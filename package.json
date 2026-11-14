@@ -1,0 +1,10 @@
+{
+  "name": "golden-key-escape",
+  "version": "1.0.0",
+  "description": "황금 열쇠 대탈출 — 멀티플레이 3D 브라우저 게임 (Three.js + WebSocket)",
+  "main": "server.js",
+  "scripts": { "start": "node server.js" },
+  "engines": { "node": ">=18" },
+  "dependencies": { "ws": "^8.18.0" },
+  "license": "MIT"
+}

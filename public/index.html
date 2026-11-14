@@ -1,0 +1,630 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<title>황금 열쇠 대탈출</title>
+<style>
+  :root { --ink:#2b2140; --paper:#fff8ee; --accent:#ff7a59; --gold:#f5b700; }
+  * { box-sizing:border-box; }
+  html,body { margin:0; height:100%; overflow:hidden; background:#bfe3ff; font-family:"Apple SD Gothic Neo","Malgun Gothic","Noto Sans KR",system-ui,sans-serif; color:var(--ink); }
+  canvas#c { position:fixed; inset:0; width:100%; height:100%; display:block; touch-action:none; }
+  .panel { background:rgba(255,248,238,.92); border:2px solid var(--ink); border-radius:14px; box-shadow:0 4px 0 var(--ink); }
+  #hud { position:fixed; top:12px; left:12px; padding:10px 14px; font-size:14px; line-height:1.6; min-width:150px; pointer-events:none; }
+  #hud b { font-size:20px; font-variant-numeric:tabular-nums; }
+  #goal { margin-top:2px; font-weight:700; color:#b3402a; }
+  #board { position:fixed; top:12px; right:12px; padding:10px 14px; font-size:13px; width:210px; pointer-events:none; }
+  #board h3 { margin:0 0 6px; font-size:13px; display:flex; justify-content:space-between; }
+  #board ol { margin:0; padding:0; list-style:none; }
+  #board li { display:flex; align-items:center; gap:6px; padding:2px 0; }
+  #board .dot { width:10px; height:10px; border-radius:50%; border:1.5px solid var(--ink); flex:none; }
+  #board .nm { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  #board .me { font-weight:800; }
+  #board .st { font-variant-numeric:tabular-nums; }
+  #net { font-weight:400; opacity:.7; }
+  #toast { position:fixed; left:50%; top:18%; transform:translateX(-50%); padding:10px 18px; font-weight:800; font-size:17px; opacity:0; transition:opacity .25s; pointer-events:none; text-align:center; max-width:90vw; }
+  #toast.on { opacity:1; }
+  #help { position:fixed; left:12px; bottom:12px; padding:8px 12px; font-size:12px; line-height:1.6; pointer-events:none; }
+  .overlay { position:fixed; inset:0; display:flex; align-items:center; justify-content:center; background:rgba(43,33,64,.45); padding:16px; }
+  .card { width:min(430px,100%); padding:22px 24px; text-align:center; }
+  .card h1 { margin:0 0 6px; font-size:28px; letter-spacing:-.5px; }
+  .card p { margin:6px 0 14px; font-size:14px; line-height:1.65; }
+  .card input { width:100%; padding:10px 12px; font:inherit; font-size:16px; border:2px solid var(--ink); border-radius:10px; background:#fff; text-align:center; }
+  #swatches { display:flex; justify-content:center; gap:8px; margin:12px 0 16px; flex-wrap:wrap; }
+  #swatches button { width:30px; height:30px; border-radius:50%; border:2px solid var(--ink); cursor:pointer; padding:0; }
+  #swatches button.sel { outline:3px solid var(--ink); outline-offset:2px; }
+  .go { font:inherit; font-size:17px; font-weight:800; padding:11px 26px; border:2px solid var(--ink); border-radius:12px; background:var(--accent); color:#fff; cursor:pointer; box-shadow:0 4px 0 var(--ink); }
+  .go:active { transform:translateY(3px); box-shadow:0 1px 0 var(--ink); }
+  #result { font-size:34px; font-weight:900; color:#b3402a; margin:4px 0 2px; font-variant-numeric:tabular-nums; }
+  #jump { position:fixed; right:22px; bottom:26px; width:78px; height:78px; border-radius:50%; font:inherit; font-weight:800; font-size:15px; display:none; background:var(--gold); border:2px solid var(--ink); box-shadow:0 4px 0 var(--ink); touch-action:none; }
+  #stick { position:fixed; width:110px; height:110px; border-radius:50%; border:2px solid rgba(43,33,64,.6); background:rgba(255,255,255,.25); display:none; pointer-events:none; }
+  #stick i { position:absolute; left:50%; top:50%; width:46px; height:46px; margin:-23px; border-radius:50%; background:rgba(43,33,64,.7); }
+  .hidden { display:none !important; }
+  @media (max-width:640px){ #help{display:none;} #board{width:160px;font-size:12px;} }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<div id="hud" class="panel">
+  ⏱ <b id="time">0.0</b>초<br>
+  ⛰ 높이 <span id="height">0</span>m
+  <div id="goal">🔑 계단 꼭대기의 열쇠를 찾아요</div>
+</div>
+
+<div id="board" class="panel">
+  <h3><span>👥 플레이어</span><span id="net">연결 중…</span></h3>
+  <ol id="list"></ol>
+</div>
+
+<div id="help" class="panel">
+  WASD / 방향키 이동 · Space 점프 · 마우스 드래그 시점 · 휠 줌<br>
+  빨간 원이 보이면 바로 피하세요! ✋
+</div>
+
+<div id="toast" class="panel"></div>
+<div id="stick"><i></i></div>
+<button id="jump">점프</button>
+
+<div id="start" class="overlay">
+  <div class="card panel">
+    <h1>🔑 황금 열쇠 대탈출</h1>
+    <p>거대한 주인 아이의 방에 갇힌 꼬마 장난감이 되어,<br>무지개 계단 꼭대기의 황금 열쇠를 들고 쥐구멍으로 탈출하세요.<br>이 주소를 친구에게 보내면 같은 방에서 함께 플레이합니다.</p>
+    <input id="name" maxlength="12" placeholder="닉네임 (최대 12자)" autocomplete="off">
+    <div id="swatches"></div>
+    <button class="go" id="startBtn">게임 시작</button>
+  </div>
+</div>
+
+<div id="end" class="overlay hidden">
+  <div class="card panel">
+    <h1>🏁 탈출 성공!</h1>
+    <div id="result"></div>
+    <p id="endMsg">기록이 다른 플레이어에게도 표시됩니다.</p>
+    <button class="go" id="againBtn">다시 도전</button>
+  </div>
+</div>
+
+<script src="three.min.js"></script>
+<script>
+(function () {
+'use strict';
+var $ = function (id) { return document.getElementById(id); };
+var clamp = function (v, a, b) { return Math.max(a, Math.min(b, v)); };
+
+if (!window.THREE) {
+  document.body.insertAdjacentHTML('beforeend', '<div class="overlay"><div class="card panel"><h1>불러오기 실패</h1><p>3D 라이브러리를 불러오지 못했어요. 새로고침해 주세요.</p></div></div>');
+  return;
+}
+
+// ---------- constants ----------
+var COLORS = [0xff6b6b, 0xffa94d, 0xffd43b, 0x69db7c, 0x38d9a9, 0x4dabf7, 0x9775fa, 0xf783ac];
+var ROOM = 18;                 // half size of the room
+var GRAVITY = 26, JUMP_V = 9.2, SPEED = 7.2;
+var STEP_UP = 0.55;            // auto step height (walk up stairs without jumping)
+var EXIT = { x: 0, z: ROOM - 0.8 };
+
+// ---------- renderer / scene ----------
+var canvas = $('c');
+var renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+var scene = new THREE.Scene();
+scene.background = new THREE.Color(0xbfe3ff);
+scene.fog = new THREE.Fog(0xbfe3ff, 60, 140);
+
+var camera = new THREE.PerspectiveCamera(60, 1, 0.1, 300);
+function resize() {
+  var w = window.innerWidth, h = window.innerHeight;
+  renderer.setSize(w, h, false);
+  camera.aspect = w / h; camera.updateProjectionMatrix();
+}
+window.addEventListener('resize', resize); resize();
+
+scene.add(new THREE.HemisphereLight(0xffffff, 0xd9c2a5, 0.5));
+var sun = new THREE.DirectionalLight(0xfff1d6, 0.6);
+sun.position.set(18, 40, 14);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+sun.shadow.camera.left = -26; sun.shadow.camera.right = 26;
+sun.shadow.camera.top = 26; sun.shadow.camera.bottom = -26;
+sun.shadow.camera.near = 1; sun.shadow.camera.far = 90;
+scene.add(sun);
+
+function std(color, rough, metal) {
+  return new THREE.MeshStandardMaterial({ color: color, roughness: rough === undefined ? 0.6 : rough, metalness: metal || 0 });
+}
+
+// ---------- room ----------
+(function buildRoom() {
+  var floor = new THREE.Mesh(new THREE.PlaneGeometry(ROOM * 2, ROOM * 2), std(0xe8c9a0, 0.8));
+  floor.rotation.x = -Math.PI / 2; floor.receiveShadow = true; scene.add(floor);
+  var rug = new THREE.Mesh(new THREE.CircleGeometry(7.2, 48), std(0xffe3ec, 0.95));
+  rug.rotation.x = -Math.PI / 2; rug.position.set(0, 0.01, -1); rug.receiveShadow = true; scene.add(rug);
+  var rug2 = new THREE.Mesh(new THREE.RingGeometry(6.2, 6.6, 48), std(0xff9eb5, 0.95));
+  rug2.rotation.x = -Math.PI / 2; rug2.position.set(0, 0.02, -1); scene.add(rug2);
+
+  var wallMat = std(0xfff3d6, 0.9), H = 9;
+  var defs = [[0, -ROOM, 0], [0, ROOM, Math.PI], [-ROOM, 0, Math.PI / 2], [ROOM, 0, -Math.PI / 2]];
+  defs.forEach(function (d) {
+    var w = new THREE.Mesh(new THREE.PlaneGeometry(ROOM * 2, H), wallMat);
+    w.position.set(d[0], H / 2, d[1]); w.rotation.y = d[2]; w.receiveShadow = true; scene.add(w);
+    var base = new THREE.Mesh(new THREE.PlaneGeometry(ROOM * 2, 0.7), std(0xffb4a2, 0.8));
+    base.position.set(d[0] * 0.999, 0.35, d[1] * 0.999); base.rotation.y = d[2]; scene.add(base);
+  });
+})();
+
+// ---------- exit (mouse hole) ----------
+var exitGlow;
+(function buildExit() {
+  var g = new THREE.Group();
+  var hole = new THREE.Mesh(new THREE.CircleGeometry(1.6, 32, 0, Math.PI), new THREE.MeshBasicMaterial({ color: 0x1d1530 }));
+  hole.position.y = 0.02; g.add(hole);
+  var frame = new THREE.Mesh(new THREE.TorusGeometry(1.68, 0.14, 10, 32, Math.PI), std(0x8d5a3b, 0.6));
+  g.add(frame);
+  exitGlow = new THREE.Mesh(new THREE.RingGeometry(1.2, 2.0, 40), new THREE.MeshBasicMaterial({ color: 0xffd43b, transparent: true, opacity: 0 }));
+  exitGlow.rotation.x = -Math.PI / 2; exitGlow.position.set(0, 0.04, -1.2); g.add(exitGlow);
+  g.position.set(EXIT.x, 0, ROOM - 0.03); g.rotation.y = Math.PI;
+  scene.add(g);
+})();
+
+// ---------- spiral stairs + altar ----------
+var steps = [];       // oriented box colliders
+var altar = null;     // circular collider
+var keyPos = new THREE.Vector3();
+(function buildStairs() {
+  var stairColors = [0xffadad, 0xffd6a5, 0xfdffb6, 0xcaffbf, 0x9bf6ff, 0xa0c4ff, 0xbdb2ff, 0xffc6ff];
+  var numSteps = 45, stepW = 5.2, stepH = 0.35, stepD = 3.0;
+  var geo = new THREE.BoxGeometry(stepW, stepH, stepD);
+  for (var i = 0; i < numSteps; i++) {
+    var angle = (i / numSteps) * Math.PI * 5.5;
+    var radius = 13.0 - i * 0.1;
+    var x = Math.cos(angle) * radius, z = Math.sin(angle) * radius - 1.0;
+    var y = 0.15 + i * stepH;
+    var rot = -angle + Math.PI / 2;
+    var m = new THREE.Mesh(geo, std(stairColors[i % stairColors.length], 0.35, 0.05));
+    m.position.set(x, y, z); m.rotation.y = rot; m.castShadow = true; m.receiveShadow = true; scene.add(m);
+    // collider follows the step's real rotation, so you can't stand on thin air beside it
+    steps.push({ cx: x, cz: z, cos: Math.cos(rot), sin: Math.sin(rot), hw: stepW / 2 + 0.25, hd: stepD / 2 + 0.2, topY: y + stepH / 2 });
+  }
+  var la = ((numSteps - 1) / numSteps) * Math.PI * 5.5, lr = 13.0 - (numSteps - 1) * 0.1;
+  var ax = Math.cos(la) * (lr - 3.2), az = Math.sin(la) * (lr - 3.2) - 1.0;
+  var ay = 0.15 + (numSteps - 1) * stepH + 0.05;
+  var am = new THREE.Mesh(new THREE.CylinderGeometry(4.5, 4.5, 0.8, 32), std(0xffd700, 0.25, 0.4));
+  am.position.set(ax, ay, az); am.castShadow = true; am.receiveShadow = true; scene.add(am);
+  altar = { cx: ax, cz: az, r: 4.6, topY: ay + 0.4 };
+  keyPos.set(ax, ay + 0.4 + 1.3, az);
+})();
+
+// ---------- golden key ----------
+function makeKey(scale) {
+  var g = new THREE.Group(), mat = std(0xffc800, 0.2, 0.7);
+  mat.emissive = new THREE.Color(0x664400);
+  var ring = new THREE.Mesh(new THREE.TorusGeometry(0.32, 0.1, 10, 24), mat); ring.position.y = 0.45; g.add(ring);
+  var shaft = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.8, 0.14), mat); shaft.position.y = -0.2; g.add(shaft);
+  var t1 = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.12, 0.14), mat); t1.position.set(0.18, -0.5, 0); g.add(t1);
+  var t2 = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.12, 0.14), mat); t2.position.set(0.14, -0.28, 0); g.add(t2);
+  g.scale.setScalar(scale || 1);
+  return g;
+}
+var worldKey = makeKey(1.5); worldKey.position.copy(keyPos); scene.add(worldKey);
+var keyLight = new THREE.PointLight(0xffd45e, 0.9, 14); keyLight.position.copy(keyPos); scene.add(keyLight);
+
+// ---------- avatars ----------
+function makeAvatar(colorIdx) {
+  var g = new THREE.Group();
+  var bodyMat = std(COLORS[colorIdx], 0.5);
+  var body = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.75, 0.55), bodyMat); body.position.y = 0.62; body.castShadow = true; g.add(body);
+  var head = new THREE.Mesh(new THREE.SphereGeometry(0.36, 20, 16), std(0xfff1e0, 0.6)); head.position.y = 1.3; head.castShadow = true; g.add(head);
+  var eyeM = new THREE.MeshBasicMaterial({ color: 0x2b2140 });
+  [-0.13, 0.13].forEach(function (ex) { var e = new THREE.Mesh(new THREE.SphereGeometry(0.055, 8, 8), eyeM); e.position.set(ex, 1.34, 0.32); g.add(e); });
+  var ant = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.3, 6), bodyMat); ant.position.y = 1.78; g.add(ant);
+  var bulb = new THREE.Mesh(new THREE.SphereGeometry(0.08, 8, 8), bodyMat); bulb.position.y = 1.95; g.add(bulb);
+  var legs = [];
+  [-0.2, 0.2].forEach(function (lx) { var l = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.3, 0.3), std(0x2b2140, 0.7)); l.position.set(lx, 0.15, 0); l.castShadow = true; g.add(l); legs.push(l); });
+  var k = makeKey(0.75); k.position.set(0, 0.85, -0.42); k.rotation.z = 0.5; k.visible = false; g.add(k);
+  g.userData = { bodyMat: bodyMat, key: k, legs: legs, colorIdx: colorIdx };
+  return g;
+}
+function setAvatarColor(av, idx) {
+  if (av.userData.colorIdx === idx) return;
+  av.userData.colorIdx = idx; av.userData.bodyMat.color.setHex(COLORS[idx]);
+}
+function makeLabel(text) {
+  var cv = document.createElement('canvas'); cv.width = 256; cv.height = 64;
+  var tex = new THREE.CanvasTexture(cv);
+  var sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true }));
+  sp.scale.set(3.2, 0.8, 1); sp.position.y = 2.55; sp.renderOrder = 10;
+  sp.userData = { cv: cv, tex: tex, text: null };
+  setLabel(sp, text);
+  return sp;
+}
+function setLabel(sp, text) {
+  if (sp.userData.text === text) return;
+  sp.userData.text = text;
+  var cv = sp.userData.cv, c = cv.getContext('2d');
+  c.clearRect(0, 0, 256, 64);
+  c.font = '800 30px "Apple SD Gothic Neo","Malgun Gothic",sans-serif'; c.textAlign = 'center'; c.textBaseline = 'middle';
+  var w = Math.min(244, c.measureText(text).width + 28);
+  c.fillStyle = 'rgba(43,33,64,.78)';
+  var x = 128 - w / 2, r = 20; c.beginPath();
+  c.moveTo(x + r, 10); c.arcTo(x + w, 10, x + w, 54, r); c.arcTo(x + w, 54, x, 54, r); c.arcTo(x, 54, x, 10, r); c.arcTo(x, 10, x + w, 10, r); c.fill();
+  c.fillStyle = '#fff'; c.fillText(text, 128, 33, 230);
+  sp.userData.tex.needsUpdate = true;
+}
+
+// ---------- local player ----------
+var me = { name: '나', colorIdx: Math.floor(Math.random() * COLORS.length), hasKey: false, finished: null };
+var player = makeAvatar(me.colorIdx); scene.add(player);
+var vy = 0, grounded = true, walkPhase = 0;
+function spawn() {
+  player.position.set(7 + Math.random() * 6, 0, 11 + Math.random() * 3);
+  player.rotation.y = Math.PI; vy = 0;
+}
+spawn();
+
+// ---------- pushable toy blocks (local to each screen) ----------
+var boxes = [];
+[[-9, 9, 0xff8787], [-12, 4, 0x74c0fc], [5, 4, 0x8ce99a]].forEach(function (d) {
+  var s = 1.7, h = 1.1;
+  var m = new THREE.Mesh(new THREE.BoxGeometry(s, h, s), std(d[2], 0.5));
+  m.position.set(d[0], h / 2, d[1]); m.castShadow = true; m.receiveShadow = true; scene.add(m);
+  boxes.push({ mesh: m, half: s / 2, top: h });
+});
+
+// ---------- giant kid + hand ----------
+var kid = new THREE.Group(), pupils = [];
+(function buildKid() {
+  var skin = std(0xffd9b8, 0.8);
+  var head = new THREE.Mesh(new THREE.SphereGeometry(7, 32, 24), skin); kid.add(head);
+  var hair = new THREE.Mesh(new THREE.SphereGeometry(7.25, 32, 16, 0, Math.PI * 2, 0, Math.PI * 0.42), std(0x5b3a29, 0.9)); kid.add(hair);
+  [-2.6, 2.6].forEach(function (ex) {
+    var w = new THREE.Mesh(new THREE.SphereGeometry(1.5, 20, 16), std(0xffffff, 0.3)); w.position.set(ex, 0.6, 6.0); kid.add(w);
+    var p = new THREE.Mesh(new THREE.SphereGeometry(0.75, 16, 12), new THREE.MeshBasicMaterial({ color: 0x1d1530 })); p.position.set(ex, 0.6, 7.2); kid.add(p);
+    pupils.push({ m: p, bx: ex });
+    var ch = new THREE.Mesh(new THREE.CircleGeometry(1.1, 20), new THREE.MeshBasicMaterial({ color: 0xff9eb5, transparent: true, opacity: 0.6 }));
+    ch.position.set(ex * 1.55, -1.8, 6.05); ch.lookAt(ex * 3, -3, 14); kid.add(ch);
+  });
+  var mouth = new THREE.Mesh(new THREE.TorusGeometry(1.4, 0.22, 8, 20, Math.PI), new THREE.MeshBasicMaterial({ color: 0xb3402a }));
+  mouth.position.set(0, -2.6, 6.45); mouth.rotation.z = Math.PI; kid.add(mouth);
+  kid.position.set(0, 15, -ROOM - 12);
+  scene.add(kid);
+})();
+
+var hand = new THREE.Group();
+(function buildHand() {
+  var skin = std(0xffd9b8, 0.75);
+  var palm = new THREE.Mesh(new THREE.BoxGeometry(4.6, 1.2, 4.4), skin); palm.castShadow = true; hand.add(palm);
+  for (var i = 0; i < 4; i++) {
+    var f = new THREE.Mesh(new THREE.BoxGeometry(0.95, 1.0, 2.8), skin);
+    f.position.set(-1.72 + i * 1.15, -0.25, 3.3); f.rotation.x = 0.25; f.castShadow = true; hand.add(f);
+  }
+  var th = new THREE.Mesh(new THREE.BoxGeometry(2.4, 1.0, 1.0), skin); th.position.set(-3.2, -0.2, 0.6); th.rotation.y = 0.5; th.castShadow = true; hand.add(th);
+  var arm = new THREE.Mesh(new THREE.CylinderGeometry(1.5, 1.8, 40, 12), std(0x74c0fc, 0.8));
+  arm.rotation.x = Math.PI / 2; arm.position.set(0, 0.4, -22); hand.add(arm);
+  hand.position.set(0, 26, -10);
+  scene.add(hand);
+})();
+var marker = new THREE.Mesh(new THREE.RingGeometry(2.1, 2.9, 40), new THREE.MeshBasicMaterial({ color: 0xff2d2d, transparent: true, opacity: 0.8, side: THREE.DoubleSide, depthWrite: false }));
+marker.rotation.x = -Math.PI / 2; marker.visible = false; scene.add(marker);
+var hs = { state: 'hover', t: 9, tx: 0, ty: 0, tz: 0, fromY: 0 };
+var HAND_R = 2.9;
+
+// ---------- input ----------
+var keys = {}, joy = { x: 0, y: 0, id: null, ox: 0, oy: 0 }, jumpHeld = false;
+var cam = { yaw: Math.PI * 0.15, pitch: 0.42, dist: 10, shake: 0 }, drag = { id: null, x: 0, y: 0 };
+window.addEventListener('keydown', function (e) {
+  if (e.target && e.target.tagName === 'INPUT') return;
+  keys[e.code] = true;
+  if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].indexOf(e.code) >= 0) e.preventDefault();
+});
+window.addEventListener('keyup', function (e) { keys[e.code] = false; });
+window.addEventListener('blur', function () { keys = {}; });
+canvas.addEventListener('pointerdown', function (e) {
+  if (e.pointerType === 'touch' && e.clientX < window.innerWidth * 0.45 && joy.id === null) {
+    joy.id = e.pointerId; joy.ox = e.clientX; joy.oy = e.clientY; joy.x = joy.y = 0;
+    var s = $('stick'); s.style.display = 'block'; s.style.left = (e.clientX - 55) + 'px'; s.style.top = (e.clientY - 55) + 'px';
+  } else if (drag.id === null) { drag.id = e.pointerId; drag.x = e.clientX; drag.y = e.clientY; }
+  try { canvas.setPointerCapture(e.pointerId); } catch (err) {}
+});
+canvas.addEventListener('pointermove', function (e) {
+  if (e.pointerId === joy.id) {
+    var dx = e.clientX - joy.ox, dy = e.clientY - joy.oy, l = Math.hypot(dx, dy), m = 48;
+    if (l > m) { dx *= m / l; dy *= m / l; }
+    joy.x = dx / m; joy.y = dy / m;
+    $('stick').firstElementChild.style.transform = 'translate(' + dx + 'px,' + dy + 'px)';
+  } else if (e.pointerId === drag.id) {
+    cam.yaw -= (e.clientX - drag.x) * 0.006; cam.pitch = clamp(cam.pitch + (e.clientY - drag.y) * 0.005, -0.25, 1.35);
+    drag.x = e.clientX; drag.y = e.clientY;
+  }
+});
+function pointerEnd(e) {
+  if (e.pointerId === joy.id) { joy.id = null; joy.x = joy.y = 0; $('stick').style.display = 'none'; $('stick').firstElementChild.style.transform = ''; }
+  if (e.pointerId === drag.id) drag.id = null;
+}
+canvas.addEventListener('pointerup', pointerEnd); canvas.addEventListener('pointercancel', pointerEnd);
+canvas.addEventListener('wheel', function (e) { cam.dist = clamp(cam.dist + e.deltaY * 0.01, 4, 22); e.preventDefault(); }, { passive: false });
+var jb = $('jump');
+jb.addEventListener('pointerdown', function (e) { jumpHeld = true; e.preventDefault(); });
+jb.addEventListener('pointerup', function () { jumpHeld = false; }); jb.addEventListener('pointercancel', function () { jumpHeld = false; });
+window.addEventListener('touchstart', function () { jb.style.display = 'block'; }, { once: true, passive: true });
+
+// ---------- UI ----------
+var game = { state: 'menu', t0: 0, elapsed: 0 };
+var toastTimer = null;
+function toast(msg, ms) {
+  var t = $('toast'); t.textContent = msg; t.classList.add('on');
+  clearTimeout(toastTimer); toastTimer = setTimeout(function () { t.classList.remove('on'); }, ms || 2200);
+}
+(function buildMenu() {
+  var sw = $('swatches');
+  COLORS.forEach(function (c, i) {
+    var b = document.createElement('button'); b.type = 'button';
+    b.style.background = '#' + c.toString(16).padStart(6, '0'); b.setAttribute('aria-label', '색 ' + (i + 1));
+    if (i === me.colorIdx) b.classList.add('sel');
+    b.addEventListener('click', function () {
+      me.colorIdx = i; setAvatarColor(player, i);
+      Array.prototype.forEach.call(sw.children, function (x) { x.classList.remove('sel'); }); b.classList.add('sel');
+    });
+    sw.appendChild(b);
+  });
+  try { var saved = localStorage.getItem('keyEscapeName'); if (saved) $('name').value = saved.slice(0, 12); } catch (e) {}
+  $('startBtn').addEventListener('click', startGame);
+  $('name').addEventListener('keydown', function (e) { if (e.key === 'Enter') startGame(); });
+  $('againBtn').addEventListener('click', function () { $('end').classList.add('hidden'); beginRun(); });
+})();
+function startGame() {
+  me.name = ($('name').value || '').trim().slice(0, 12) || ('장난감' + Math.floor(Math.random() * 90 + 10));
+  try { localStorage.setItem('keyEscapeName', me.name); } catch (e) {}
+  $('start').classList.add('hidden');
+  beginRun();
+}
+function beginRun() {
+  me.hasKey = false; me.finished = null; spawn();
+  game.state = 'play'; game.t0 = performance.now(); game.elapsed = 0;
+  hs.state = 'hover'; hs.t = 9; marker.visible = false;
+  setGoal();
+  toast('계단을 걸어 올라가 황금 열쇠를 찾으세요!', 2600);
+}
+function setGoal() {
+  $('goal').textContent = me.hasKey ? '🚪 열쇠를 들고 벽의 쥐구멍으로!' : '🔑 계단 꼭대기의 열쇠를 찾아요';
+}
+
+// ---------- support height / collisions ----------
+function supportAt(x, y, z) {
+  var s = 0, i, p, dx, dz, lx, lz;
+  for (i = 0; i < boxes.length; i++) {
+    p = boxes[i];
+    if (Math.abs(x - p.mesh.position.x) <= p.half + 0.1 && Math.abs(z - p.mesh.position.z) <= p.half + 0.1 && y >= p.top - 0.25) s = Math.max(s, p.top);
+  }
+  for (i = 0; i < steps.length; i++) {
+    p = steps[i];
+    if (y + STEP_UP < p.topY) continue;
+    dx = x - p.cx; dz = z - p.cz;
+    lx = dx * p.cos - dz * p.sin; lz = dx * p.sin + dz * p.cos;
+    if (Math.abs(lx) <= p.hw && Math.abs(lz) <= p.hd) s = Math.max(s, p.topY);
+  }
+  if (y + STEP_UP >= altar.topY && Math.hypot(x - altar.cx, z - altar.cz) <= altar.r) s = Math.max(s, altar.topY);
+  return s;
+}
+function pushBoxes() {
+  var px = player.position, lim = ROOM - 0.4;
+  for (var i = 0; i < boxes.length; i++) {
+    var b = boxes[i], bp = b.mesh.position, reach = b.half + 0.38;
+    var dx = px.x - bp.x, dz = px.z - bp.z;
+    if (Math.abs(dx) >= reach || Math.abs(dz) >= reach || px.y >= b.top - 0.25) continue;
+    if (reach - Math.abs(dx) < reach - Math.abs(dz)) {
+      var nx = clamp(px.x - Math.sign(dx || 1) * reach, -lim + b.half, lim - b.half);
+      bp.x = nx; px.x = nx + Math.sign(dx || 1) * reach;
+    } else {
+      var nz = clamp(px.z - Math.sign(dz || 1) * reach, -lim + b.half, lim - b.half);
+      bp.z = nz; px.z = nz + Math.sign(dz || 1) * reach;
+    }
+  }
+}
+
+// ---------- multiplayer (room presence) ----------
+var ws = null, remotes = {}, lastSend = 0, netOk = false, snapshot = [];
+var roomCode = (new URLSearchParams(location.search).get('room') || 'lobby').toLowerCase().replace(/[^a-z0-9_-]/g, '').slice(0, 24) || 'lobby';
+function readPeer(pr) {
+  if (!pr || typeof pr !== 'object') return null;
+  var a = pr.p;
+  if (!Array.isArray(a) || a.length < 4) return null;
+  for (var i = 0; i < 4; i++) if (typeof a[i] !== 'number' || !isFinite(a[i])) return null;
+  return {
+    x: clamp(a[0], -ROOM, ROOM), y: clamp(a[1], 0, 40), z: clamp(a[2], -ROOM, ROOM), ry: a[3],
+    name: (typeof pr.n === 'string' && pr.n.trim() ? pr.n.trim().slice(0, 12) : '친구'),
+    c: (typeof pr.c === 'number' && isFinite(pr.c)) ? ((Math.floor(pr.c) % COLORS.length) + COLORS.length) % COLORS.length : 0,
+    k: pr.k === true, t: (typeof pr.t === 'number' && isFinite(pr.t) && pr.t > 0) ? pr.t : null
+  };
+}
+function syncRemotes(dt) {
+  var seen = {}, list = [];
+  {
+    var peers = netOk ? snapshot : [];
+    for (var i = 0; i < peers.length; i++) {
+      var p = peers[i]; if (!p || typeof p.id !== 'string') continue;
+      var d = readPeer(p); if (!d) continue;
+      seen[p.id] = true; list.push(d);
+      var r = remotes[p.id];
+      if (!r) {
+        r = { av: makeAvatar(d.c), label: makeLabel(d.name) };
+        r.av.add(r.label); r.av.position.set(d.x, d.y, d.z); scene.add(r.av); remotes[p.id] = r;
+      }
+      setAvatarColor(r.av, d.c); setLabel(r.label, d.name); r.av.userData.key.visible = d.k; r.av.visible = d.t === null;
+      var k = 1 - Math.pow(0.0005, dt), pos = r.av.position;
+      var moved = Math.hypot(d.x - pos.x, d.z - pos.z);
+      pos.x += (d.x - pos.x) * k; pos.y += (d.y - pos.y) * k; pos.z += (d.z - pos.z) * k;
+      var dr = d.ry - r.av.rotation.y; dr = Math.atan2(Math.sin(dr), Math.cos(dr)); r.av.rotation.y += dr * k;
+      animateLegs(r.av, moved > 0.02, dt);
+    }
+  }
+  for (var id in remotes) if (!seen[id]) { scene.remove(remotes[id].av); delete remotes[id]; }
+  return list;
+}
+function sendPresence(now) {
+  if (!ws || ws.readyState !== 1 || now - lastSend < 66 || game.state === 'menu') return;
+  lastSend = now;
+  var p = player.position;
+  try {
+    ws.send(JSON.stringify({ n: me.name, c: me.colorIdx, k: me.hasKey, t: me.finished,
+      p: [Math.round(p.x * 100) / 100, Math.round(p.y * 100) / 100, Math.round(p.z * 100) / 100, Math.round(player.rotation.y * 100) / 100] }));
+  } catch (e) {}
+}
+function connect() {
+  if (location.protocol !== 'http:' && location.protocol !== 'https:') return;
+  try {
+    ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws?room=' + encodeURIComponent(roomCode));
+  } catch (e) { setTimeout(connect, 3000); return; }
+  ws.onopen = function () { netOk = true; };
+  ws.onmessage = function (ev) {
+    try { var m = JSON.parse(ev.data); if (m && Array.isArray(m.peers)) snapshot = m.peers; } catch (e) {}
+  };
+  ws.onclose = function () { netOk = false; snapshot = []; setTimeout(connect, 2000); };
+  ws.onerror = function () { try { ws.close(); } catch (e) {} };
+}
+connect();
+
+function fmt(t) { return t.toFixed(1) + '초'; }
+function updateBoard(list) {
+  var rows = [{ name: me.name, c: me.colorIdx, y: player.position.y, k: me.hasKey, t: me.finished, me: true }];
+  list.forEach(function (d) { rows.push({ name: d.name, c: d.c, y: d.y, k: d.k, t: d.t, me: false }); });
+  rows.sort(function (a, b) {
+    if ((a.t !== null) !== (b.t !== null)) return a.t !== null ? -1 : 1;
+    if (a.t !== null) return a.t - b.t;
+    if (a.k !== b.k) return a.k ? -1 : 1;
+    return b.y - a.y;
+  });
+  var ol = $('list'); ol.textContent = '';
+  rows.slice(0, 10).forEach(function (r) {
+    var li = document.createElement('li'); if (r.me) li.className = 'me';
+    var dot = document.createElement('span'); dot.className = 'dot'; dot.style.background = '#' + COLORS[r.c].toString(16).padStart(6, '0');
+    var nm = document.createElement('span'); nm.className = 'nm'; nm.textContent = r.name + (r.me ? ' (나)' : '');
+    var st = document.createElement('span'); st.className = 'st';
+    st.textContent = r.t !== null ? '🏁 ' + fmt(r.t) : (r.k ? '🔑 ' : '') + Math.round(r.y) + 'm';
+    li.appendChild(dot); li.appendChild(nm); li.appendChild(st); ol.appendChild(li);
+  });
+  $('net').textContent = netOk ? (rows.length > 1 ? rows.length + '명 접속 중' : '친구 기다리는 중') : '연결 중…';
+}
+
+// ---------- per-frame logic ----------
+function animateLegs(av, moving, dt) {
+  var ud = av.userData; ud.ph = (ud.ph || 0) + (moving ? dt * 14 : 0);
+  var s = moving ? Math.sin(ud.ph) * 0.18 : 0;
+  ud.legs[0].position.z = s; ud.legs[1].position.z = -s;
+}
+function updatePlayer(dt) {
+  var f = 0, r = 0;
+  if (keys.KeyW || keys.ArrowUp) f += 1; if (keys.KeyS || keys.ArrowDown) f -= 1;
+  if (keys.KeyD || keys.ArrowRight) r += 1; if (keys.KeyA || keys.ArrowLeft) r -= 1;
+  f -= joy.y; r += joy.x;
+  var mx = -Math.sin(cam.yaw) * f + Math.cos(cam.yaw) * r;
+  var mz = -Math.cos(cam.yaw) * f - Math.sin(cam.yaw) * r;
+  var len = Math.hypot(mx, mz), moving = len > 0.08, p = player.position;
+  if (moving) {
+    var sp = SPEED * Math.min(1, len); mx /= len; mz /= len;
+    p.x += mx * sp * dt; p.z += mz * sp * dt;
+    var want = Math.atan2(mx, mz), d = want - player.rotation.y; d = Math.atan2(Math.sin(d), Math.cos(d));
+    player.rotation.y += d * Math.min(1, dt * 14);
+  }
+  pushBoxes();
+  p.x = clamp(p.x, -ROOM + 0.4, ROOM - 0.4); p.z = clamp(p.z, -ROOM + 0.4, ROOM - 0.4);
+
+  if ((keys.Space || jumpHeld) && grounded) { vy = JUMP_V; grounded = false; }
+  vy -= GRAVITY * dt; p.y += vy * dt;
+  var sup = supportAt(p.x, p.y, p.z);
+  if (p.y <= sup && vy <= 0.01) { p.y = sup; vy = 0; grounded = true; } else grounded = false;
+  animateLegs(player, moving && grounded, dt);
+
+  // key pickup
+  if (!me.hasKey && Math.hypot(p.x - keyPos.x, p.z - keyPos.z) < 1.5 && Math.abs(p.y + 1 - keyPos.y) < 2.2) {
+    me.hasKey = true; setGoal(); toast('🔑 황금 열쇠 획득! 이제 쥐구멍으로 탈출하세요!', 2800);
+  }
+  // escape
+  if (me.hasKey && p.y < 1 && Math.hypot(p.x - EXIT.x, p.z - EXIT.z) < 1.9) finish();
+  else if (!me.hasKey && p.y < 1 && Math.hypot(p.x - EXIT.x, p.z - EXIT.z) < 1.9 && !updatePlayer.warned) {
+    updatePlayer.warned = true; toast('쥐구멍이 잠겨 있어요. 열쇠가 필요해요 🔒');
+    setTimeout(function () { updatePlayer.warned = false; }, 3000);
+  }
+}
+function finish() {
+  me.finished = Math.round(game.elapsed * 10) / 10; game.state = 'done';
+  marker.visible = false; hs.state = 'hover'; hs.t = 9;
+  $('result').textContent = fmt(me.finished);
+  $('end').classList.remove('hidden');
+}
+function caught() {
+  var hadKey = me.hasKey; me.hasKey = false; setGoal(); spawn(); cam.shake = 0.5;
+  toast(hadKey ? '✋ 잡혔어요! 열쇠를 빼앗기고 처음으로…' : '✋ 잡혔어요! 처음 자리로 돌아갑니다', 2600);
+}
+function updateHand(dt) {
+  var p = player.position, hp = hand.position, active = game.state === 'play';
+  if (hs.state === 'hover') {
+    var k = 1 - Math.pow(0.2, dt);
+    hp.x += (p.x * 0.6 - hp.x) * k; hp.z += (p.z * 0.6 - 4 - hp.z) * k; hp.y += (p.y + 17 - hp.y) * k;
+    if (active) { hs.t -= dt; if (hs.t <= 0) { hs.state = 'warn'; hs.t = 1.5; marker.visible = true; } }
+  } else if (hs.state === 'warn') {
+    hs.t -= dt;
+    if (hs.t > 0.55) { hs.tx = p.x; hs.tz = p.z; hs.ty = grounded ? p.y : supportAt(p.x, p.y, p.z); }   // tracks you, then locks
+    marker.position.set(hs.tx, hs.ty + 0.08, hs.tz);
+    marker.material.opacity = 0.45 + 0.45 * Math.abs(Math.sin(performance.now() * 0.02));
+    var k2 = 1 - Math.pow(0.001, dt);
+    hp.x += (hs.tx - hp.x) * k2; hp.z += (hs.tz - hp.z) * k2; hp.y += (hs.ty + 10 - hp.y) * k2;
+    if (hs.t <= 0) { hs.state = 'slam'; hs.t = 0.22; hs.fromY = hp.y; hp.x = hs.tx; hp.z = hs.tz; }
+  } else if (hs.state === 'slam') {
+    hs.t -= dt;
+    var u = clamp(1 - hs.t / 0.22, 0, 1);
+    hp.y = hs.fromY + (hs.ty + 0.7 - hs.fromY) * u * u;
+    if (hs.t <= 0) {
+      cam.shake = Math.max(cam.shake, 0.3); marker.visible = false;
+      if (active && Math.hypot(p.x - hs.tx, p.z - hs.tz) < HAND_R && Math.abs(p.y - hs.ty) < 2.4) caught();
+      hs.state = 'rest'; hs.t = 0.8;
+    }
+  } else if (hs.state === 'rest') {
+    hs.t -= dt; if (hs.t <= 0) { hs.state = 'hover'; hs.t = 6 + Math.random() * 4; }
+  }
+  // the kid watches you
+  var ex = clamp(p.x / ROOM, -1, 1) * 0.55, ey = clamp((p.y - 8) / 16, -1, 1) * 0.5;
+  pupils.forEach(function (pu) { pu.m.position.x = pu.bx + ex; pu.m.position.y = 0.6 + ey; });
+  kid.position.y = 15 + Math.sin(performance.now() * 0.0012) * 0.5;
+}
+function updateCamera(dt) {
+  var p = player.position, cp = Math.cos(cam.pitch);
+  var tx = p.x, ty = p.y + 1.3, tz = p.z;
+  var sx = 0, sy = 0;
+  if (cam.shake > 0) { cam.shake = Math.max(0, cam.shake - dt); sx = (Math.random() - 0.5) * cam.shake; sy = (Math.random() - 0.5) * cam.shake; }
+  camera.position.set(tx + Math.sin(cam.yaw) * cp * cam.dist + sx, Math.max(0.4, ty + Math.sin(cam.pitch) * cam.dist + sy), tz + Math.cos(cam.yaw) * cp * cam.dist);
+  camera.lookAt(tx, ty, tz);
+}
+
+var last = performance.now(), boardT = 0;
+function frame(now) {
+  requestAnimationFrame(frame);
+  var dt = Math.min(0.05, (now - last) / 1000); last = now;
+  if (game.state === 'play') { game.elapsed = (now - game.t0) / 1000; updatePlayer(dt); }
+  else if (game.state === 'menu') { cam.yaw += dt * 0.08; }
+  updateHand(dt);
+  var list = syncRemotes(dt);
+  sendPresence(now);
+
+  worldKey.visible = !me.hasKey && game.state !== 'done';
+  worldKey.rotation.y += dt * 2; worldKey.position.y = keyPos.y + Math.sin(now * 0.003) * 0.2;
+  player.userData.key.visible = me.hasKey; player.visible = game.state !== 'done';
+  exitGlow.material.opacity = me.hasKey ? 0.35 + 0.3 * Math.sin(now * 0.006) : 0;
+
+  boardT -= dt;
+  if (boardT <= 0) {
+    boardT = 0.3;
+    $('time').textContent = game.elapsed.toFixed(1); $('height').textContent = Math.round(player.position.y);
+    updateBoard(list);
+  }
+  updateCamera(dt);
+  renderer.render(scene, camera);
+}
+requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
