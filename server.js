@@ -36,6 +36,7 @@ function sanitize(m) {
     n: typeof m.n === 'string' ? m.n.slice(0, 12) : '',
     c: num(m.c) ? c(Math.floor(m.c), 0, 7) : 0,
     k: m.k === true,
+    e: num(m.e) && m.e >= 1 && m.e <= 4 ? Math.floor(m.e) : 0,
     t: num(m.t) && m.t > 0 ? c(m.t, 0, 99999) : null,
     p: [c(m.p[0], -18, 18), c(m.p[1], 0, 40), c(m.p[2], -18, 18), c(m.p[3], -100, 100)],
   };

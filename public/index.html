@@ -39,8 +39,12 @@
   #jump { position:fixed; right:22px; bottom:26px; width:78px; height:78px; border-radius:50%; font:inherit; font-weight:800; font-size:15px; display:none; background:var(--gold); border:2px solid var(--ink); box-shadow:0 4px 0 var(--ink); touch-action:none; }
   #stick { position:fixed; width:110px; height:110px; border-radius:50%; border:2px solid rgba(43,33,64,.6); background:rgba(255,255,255,.25); display:none; pointer-events:none; }
   #stick i { position:absolute; left:50%; top:50%; width:46px; height:46px; margin:-23px; border-radius:50%; background:rgba(43,33,64,.7); }
+  #tools { position:fixed; top:12px; left:50%; transform:translateX(-50%); display:flex; gap:8px; }
+  #tools button { font:inherit; font-size:18px; width:42px; height:42px; border-radius:12px; border:2px solid var(--ink); background:rgba(255,248,238,.92); box-shadow:0 3px 0 var(--ink); cursor:pointer; padding:0; }
+  #tools button:active { transform:translateY(2px); box-shadow:0 1px 0 var(--ink); }
+  #endStats { font-size:15px; font-weight:700; margin:6px 0 2px; }
   .hidden { display:none !important; }
-  @media (max-width:640px){ #help{display:none;} #board{width:160px;font-size:12px;} }
+  @media (max-width:640px){ #help{display:none;} #board{width:160px;font-size:12px;} #tools{top:auto;bottom:14px;} }
 </style>
 </head>
 <body>
@@ -48,7 +52,7 @@
 
 <div id="hud" class="panel">
   ⏱ <b id="time">0.0</b>초<br>
-  ⛰ 높이 <span id="height">0</span>m
+  ⛰ 높이 <span id="height">0</span>m · ⭐ <span id="stars">0</span>/<span id="starMax">0</span>
   <div id="goal">🔑 계단 꼭대기의 열쇠를 찾아요</div>
 </div>
 
@@ -59,9 +63,15 @@
 
 <div id="help" class="panel">
   WASD / 방향키 이동 · Space 점프 · 마우스 드래그 시점 · 휠 줌<br>
+  1~4 이모티콘 · 깃발은 체크포인트 🚩 · 구슬은 점프로 피해요<br>
   빨간 원이 보이면 바로 피하세요! ✋
 </div>
 
+<div id="tools">
+  <button id="muteBtn" type="button" aria-label="소리 켜기/끄기">🔊</button>
+  <button id="shareBtn" type="button" aria-label="방 주소 복사">🔗</button>
+  <button id="waveBtn" type="button" aria-label="인사하기">👋</button>
+</div>
 <div id="toast" class="panel"></div>
 <div id="stick"><i></i></div>
 <button id="jump">점프</button>
@@ -80,6 +90,7 @@
   <div class="card panel">
     <h1>🏁 탈출 성공!</h1>
     <div id="result"></div>
+    <div id="endStats"></div>
     <p id="endMsg">기록이 다른 플레이어에게도 표시됩니다.</p>
     <button class="go" id="againBtn">다시 도전</button>
   </div>
@@ -103,6 +114,9 @@ var ROOM = 18;                 // half size of the room
 var GRAVITY = 26, JUMP_V = 9.2, SPEED = 7.2;
 var STEP_UP = 0.55;            // auto step height (walk up stairs without jumping)
 var EXIT = { x: 0, z: ROOM - 0.8 };
+var CHECKPOINTS = [15, 30];     // stair indexes with a flag
+var EMOTES = ['👋', '😂', '😱', '👍'];
+var MARBLE_R = 0.6, MARBLE_PERIOD = 39000, MARBLE_N = 3;
 
 // ---------- renderer / scene ----------
 var canvas = $('c');
@@ -154,6 +168,32 @@ function std(color, rough, metal) {
     var base = new THREE.Mesh(new THREE.PlaneGeometry(ROOM * 2, 0.7), std(0xffb4a2, 0.8));
     base.position.set(d[0] * 0.999, 0.35, d[1] * 0.999); base.rotation.y = d[2]; scene.add(base);
   });
+  // wall decorations (purely visual)
+  function onWall(mesh, wall, along, y, off) {   // wall: 0 back(-z) 1 front(+z) 2 left(-x) 3 right(+x)
+    var d = defs[wall], inx = d[0] ? -Math.sign(d[0]) : 0, inz = d[1] ? -Math.sign(d[1]) : 0;
+    mesh.position.set(d[0] + inx * off + (d[0] ? 0 : along), y, d[1] + inz * off + (d[1] ? 0 : along));
+    mesh.rotation.y = d[2]; scene.add(mesh);
+  }
+  var frameMat = std(0xffffff, 0.5);
+  [-8, 8].forEach(function (a) {   // windows on the left wall
+    onWall(new THREE.Mesh(new THREE.PlaneGeometry(5.6, 4.6), frameMat), 2, a, 5.4, 0.02);
+    onWall(new THREE.Mesh(new THREE.PlaneGeometry(5, 4), new THREE.MeshBasicMaterial({ color: 0x8fd3ff })), 2, a, 5.4, 0.04);
+    onWall(new THREE.Mesh(new THREE.PlaneGeometry(0.22, 4), frameMat), 2, a, 5.4, 0.06);
+    onWall(new THREE.Mesh(new THREE.PlaneGeometry(5, 0.22), frameMat), 2, a, 5.4, 0.06);
+    onWall(new THREE.Mesh(new THREE.CircleGeometry(0.8, 24), new THREE.MeshBasicMaterial({ color: 0xffffff })), 2, a - 1.2, 6.2, 0.05);
+    onWall(new THREE.Mesh(new THREE.CircleGeometry(0.55, 24), new THREE.MeshBasicMaterial({ color: 0xffffff })), 2, a - 0.3, 6.0, 0.05);
+  });
+  [[-9, 0xffadad, 0xff6b6b], [0, 0xa0c4ff, 0x4dabf7], [9, 0xcaffbf, 0x69db7c]].forEach(function (d2, i) {   // posters on the right wall
+    onWall(new THREE.Mesh(new THREE.PlaneGeometry(3.6, 4.4), std(0x8d5a3b, 0.7)), 3, d2[0], 5.6, 0.02);
+    onWall(new THREE.Mesh(new THREE.PlaneGeometry(3.1, 3.9), std(d2[1], 0.9)), 3, d2[0], 5.6, 0.04);
+    var shape = i === 1 ? new THREE.CircleGeometry(1.0, 5) : new THREE.CircleGeometry(1.0, i === 0 ? 3 : 32);
+    onWall(new THREE.Mesh(shape, new THREE.MeshBasicMaterial({ color: d2[2] })), 3, d2[0], 5.6, 0.06);
+  });
+  var flagCols = [0xff6b6b, 0xffd43b, 0x69db7c, 0x4dabf7, 0x9775fa, 0xf783ac];   // bunting above the mouse hole
+  for (var b = 0; b < 12; b++) {
+    var tri = new THREE.Mesh(new THREE.CircleGeometry(0.7, 3), new THREE.MeshBasicMaterial({ color: flagCols[b % flagCols.length], side: THREE.DoubleSide }));
+    onWall(tri, 1, -13.2 + b * 2.4, 7.6 - Math.sin((b / 11) * Math.PI) * 0.9, 0.05); tri.rotation.z = -Math.PI / 2;
+  }
 })();
 
 // ---------- exit (mouse hole) ----------
@@ -187,7 +227,7 @@ var keyPos = new THREE.Vector3();
     var m = new THREE.Mesh(geo, std(stairColors[i % stairColors.length], 0.35, 0.05));
     m.position.set(x, y, z); m.rotation.y = rot; m.castShadow = true; m.receiveShadow = true; scene.add(m);
     // collider follows the step's real rotation, so you can't stand on thin air beside it
-    steps.push({ cx: x, cz: z, cos: Math.cos(rot), sin: Math.sin(rot), hw: stepW / 2 + 0.25, hd: stepD / 2 + 0.2, topY: y + stepH / 2 });
+    steps.push({ cx: x, cz: z, cos: Math.cos(rot), sin: Math.sin(rot), hw: stepW / 2 + 0.25, hd: stepD / 2 + 0.2, topY: y + stepH / 2, rx: Math.cos(angle), rz: Math.sin(angle) });
   }
   var la = ((numSteps - 1) / numSteps) * Math.PI * 5.5, lr = 13.0 - (numSteps - 1) * 0.1;
   var ax = Math.cos(la) * (lr - 3.2), az = Math.sin(la) * (lr - 3.2) - 1.0;
@@ -197,6 +237,116 @@ var keyPos = new THREE.Vector3();
   altar = { cx: ax, cz: az, r: 4.6, topY: ay + 0.4 };
   keyPos.set(ax, ay + 0.4 + 1.3, az);
 })();
+
+// ---------- checkpoint flags ----------
+var flags = [];
+CHECKPOINTS.forEach(function (idx) {
+  var st = steps[idx], g = new THREE.Group();
+  var pole = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 2.2, 8), std(0xffffff, 0.4)); pole.position.y = 1.1; g.add(pole);
+  var cloth = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 0.6), new THREE.MeshBasicMaterial({ color: 0xadb5bd, side: THREE.DoubleSide }));
+  cloth.position.set(0.48, 1.85, 0); g.add(cloth);
+  g.position.set(st.cx + st.rx * 1.25, st.topY, st.cz + st.rz * 1.25);
+  scene.add(g); flags.push({ idx: idx, cloth: cloth });
+});
+
+// ---------- stars (collectibles) ----------
+var stars = [];
+(function buildStars() {
+  var geo = new THREE.OctahedronGeometry(0.38), mat = std(0xffe066, 0.25, 0.3);
+  mat.emissive = new THREE.Color(0x8a6a00);
+  function add(x, y, z) {
+    var m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); scene.add(m);
+    stars.push({ mesh: m, x: x, y: y, z: z, got: false });
+  }
+  for (var i = 3; i < steps.length - 1; i += 4) {
+    var st = steps[i], side = (i % 8 === 3) ? 1 : -1;      // alternate outer / inner edge, some need a jump
+    add(st.cx + st.rx * side * 1.0, st.topY + (i % 3 === 0 ? 2.3 : 1.2), st.cz + st.rz * side * 1.0);
+  }
+  add(-14.5, 1.2, 14.5); add(14.5, 1.2, -14.5); add(0, 1.2, -1);   // floor: two corners + the middle of the rug
+})();
+
+// ---------- rolling marbles (same timing for everyone in the room) ----------
+var marbles = [];
+(function buildMarbles() {
+  var cols = [0xff6b6b, 0x4dabf7, 0x69db7c];
+  for (var i = 0; i < MARBLE_N; i++) {
+    var m = new THREE.Mesh(new THREE.SphereGeometry(MARBLE_R, 20, 14), std(cols[i % cols.length], 0.15, 0.2));
+    m.castShadow = true; scene.add(m);
+    var stripe = new THREE.Mesh(new THREE.TorusGeometry(MARBLE_R * 0.98, 0.07, 6, 20), new THREE.MeshBasicMaterial({ color: 0xffffff })); m.add(stripe);
+    marbles.push({ mesh: m, off: (i - 1) * 0.85, dx: 0, dz: 0 });
+  }
+})();
+function updateMarbles(dt) {
+  var top = steps.length - 2, lowest = 3, span = top - lowest;
+  for (var i = 0; i < marbles.length; i++) {
+    var mb = marbles[i], ph = ((Date.now() + i * MARBLE_PERIOD / marbles.length) % MARBLE_PERIOD) / MARBLE_PERIOD;
+    var u = top - ph * span, a = Math.floor(u), f = u - a, s0 = steps[a], s1 = steps[Math.min(a + 1, steps.length - 1)];
+    var x = s0.cx + (s1.cx - s0.cx) * f + (s0.rx + (s1.rx - s0.rx) * f) * mb.off;
+    var z = s0.cz + (s1.cz - s0.cz) * f + (s0.rz + (s1.rz - s0.rz) * f) * mb.off;
+    var y = s0.topY + (s1.topY - s0.topY) * f + MARBLE_R;
+    var pos = mb.mesh.position, mvx = x - pos.x, mvz = z - pos.z, ml = Math.hypot(mvx, mvz);
+    if (ml > 0.0001 && ml < 2) { mb.dx = mvx / ml; mb.dz = mvz / ml; mb.mesh.rotation.x += ml / MARBLE_R * mb.dz; mb.mesh.rotation.z -= ml / MARBLE_R * mb.dx; }
+    pos.set(x, y, z);
+    // fade in at the top, pop at the bottom
+    var sc = Math.min(1, ph * 30, (1 - ph) * 30); mb.mesh.scale.setScalar(Math.max(0.01, sc));
+    mb.live = sc > 0.8;
+  }
+}
+
+// ---------- particles ----------
+var bursts = [];
+function burst(x, y, z, color, n, power) {
+  var pos = new Float32Array(n * 3), vel = [];
+  for (var i = 0; i < n; i++) {
+    pos[i * 3] = x; pos[i * 3 + 1] = y; pos[i * 3 + 2] = z;
+    var a = Math.random() * Math.PI * 2, e = Math.random() * Math.PI - Math.PI / 2, sp = (power || 5) * (0.4 + Math.random() * 0.6);
+    vel.push(Math.cos(a) * Math.cos(e) * sp, Math.abs(Math.sin(e)) * sp + 2, Math.sin(a) * Math.cos(e) * sp);
+  }
+  var geo = new THREE.BufferGeometry(), attr = new THREE.BufferAttribute(pos, 3);
+  if (geo.setAttribute) geo.setAttribute('position', attr); else geo.addAttribute('position', attr);
+  var pts = new THREE.Points(geo, new THREE.PointsMaterial({ color: color, size: 0.28, transparent: true, depthWrite: false }));
+  pts.frustumCulled = false; scene.add(pts);
+  bursts.push({ pts: pts, attr: attr, vel: vel, t: 0, life: 1.1 });
+}
+function updateBursts(dt) {
+  for (var i = bursts.length - 1; i >= 0; i--) {
+    var b = bursts[i], arr = b.attr.array; b.t += dt;
+    for (var j = 0; j < b.vel.length; j += 3) {
+      b.vel[j + 1] -= 14 * dt;
+      arr[j] += b.vel[j] * dt; arr[j + 1] += b.vel[j + 1] * dt; arr[j + 2] += b.vel[j + 2] * dt;
+    }
+    b.attr.needsUpdate = true; b.pts.material.opacity = Math.max(0, 1 - b.t / b.life);
+    if (b.t >= b.life) { scene.remove(b.pts); b.pts.geometry.dispose(); b.pts.material.dispose(); bursts.splice(i, 1); }
+  }
+}
+
+// ---------- sound (tiny synth, no audio files) ----------
+var AC = null, muted = false;
+try { muted = localStorage.getItem('keyEscapeMute') === '1'; } catch (e) {}
+function tone(freq, dur, type, vol, slideTo, delay) {
+  if (muted) return;
+  try {
+    if (!AC) { var Ctx = window.AudioContext || window.webkitAudioContext; if (!Ctx) return; AC = new Ctx(); }
+    if (AC.state === 'suspended') AC.resume();
+    var o = AC.createOscillator(), g = AC.createGain(), t = AC.currentTime + (delay || 0);
+    o.type = type || 'sine'; o.frequency.setValueAtTime(freq, t);
+    if (slideTo) o.frequency.exponentialRampToValueAtTime(slideTo, t + dur);
+    g.gain.setValueAtTime(vol || 0.1, t); g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+    o.connect(g); g.connect(AC.destination); o.start(t); o.stop(t + dur + 0.02);
+  } catch (e) {}
+}
+function sfx(name) {
+  if (name === 'jump') tone(320, 0.16, 'square', 0.05, 620);
+  else if (name === 'star') { tone(880, 0.1, 'triangle', 0.1); tone(1320, 0.16, 'triangle', 0.1, 0, 0.08); }
+  else if (name === 'key') [523, 659, 784, 1047].forEach(function (f, i) { tone(f, 0.22, 'triangle', 0.11, 0, i * 0.09); });
+  else if (name === 'warn') tone(180, 0.28, 'sawtooth', 0.05, 240);
+  else if (name === 'slam') tone(110, 0.35, 'sine', 0.22, 40);
+  else if (name === 'caught') { tone(400, 0.2, 'square', 0.07, 200); tone(200, 0.35, 'square', 0.07, 90, 0.18); }
+  else if (name === 'hit') tone(240, 0.2, 'square', 0.08, 90);
+  else if (name === 'flag') { tone(660, 0.12, 'triangle', 0.1); tone(880, 0.2, 'triangle', 0.1, 0, 0.1); }
+  else if (name === 'win') [523, 659, 784, 659, 784, 1047].forEach(function (f, i) { tone(f, 0.25, 'triangle', 0.12, 0, i * 0.12); });
+  else if (name === 'emote') tone(700, 0.09, 'sine', 0.06, 900);
+}
 
 // ---------- golden key ----------
 function makeKey(scale) {
@@ -225,8 +375,22 @@ function makeAvatar(colorIdx) {
   var legs = [];
   [-0.2, 0.2].forEach(function (lx) { var l = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.3, 0.3), std(0x2b2140, 0.7)); l.position.set(lx, 0.15, 0); l.castShadow = true; g.add(l); legs.push(l); });
   var k = makeKey(0.75); k.position.set(0, 0.85, -0.42); k.rotation.z = 0.5; k.visible = false; g.add(k);
-  g.userData = { bodyMat: bodyMat, key: k, legs: legs, colorIdx: colorIdx };
+  var em = new THREE.Sprite(new THREE.SpriteMaterial({ depthTest: false, transparent: true }));
+  em.scale.set(1.3, 1.3, 1); em.position.y = 3.5; em.renderOrder = 11; em.visible = false; g.add(em);
+  g.userData = { bodyMat: bodyMat, key: k, legs: legs, colorIdx: colorIdx, emote: em, emoteIdx: 0 };
   return g;
+}
+var emoteTex = {};
+function showEmote(av, idx) {     // idx 0 hides, 1..EMOTES.length shows
+  var ud = av.userData; if (ud.emoteIdx === idx) return;
+  ud.emoteIdx = idx; ud.emote.visible = idx > 0; if (!idx) return;
+  if (!emoteTex[idx]) {
+    var cv = document.createElement('canvas'); cv.width = cv.height = 128;
+    var c = cv.getContext('2d'); c.fillStyle = 'rgba(255,255,255,.92)'; c.beginPath(); c.arc(64, 64, 60, 0, Math.PI * 2); c.fill();
+    c.font = '76px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif'; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText(EMOTES[idx - 1], 64, 70);
+    emoteTex[idx] = new THREE.CanvasTexture(cv);
+  }
+  ud.emote.material.map = emoteTex[idx]; ud.emote.material.needsUpdate = true;
 }
 function setAvatarColor(av, idx) {
   if (av.userData.colorIdx === idx) return;
@@ -256,12 +420,13 @@ function setLabel(sp, text) {
 }
 
 // ---------- local player ----------
-var me = { name: '나', colorIdx: Math.floor(Math.random() * COLORS.length), hasKey: false, finished: null };
+var me = { name: '나', colorIdx: Math.floor(Math.random() * COLORS.length), hasKey: false, finished: null, stars: 0, cp: -1, emote: 0, emoteT: 0 };
 var player = makeAvatar(me.colorIdx); scene.add(player);
-var vy = 0, grounded = true, walkPhase = 0;
+var vy = 0, grounded = true, airT = 0, knock = { x: 0, z: 0, cd: 0 };
 function spawn() {
-  player.position.set(7 + Math.random() * 6, 0, 11 + Math.random() * 3);
-  player.rotation.y = Math.PI; vy = 0;
+  if (me.cp >= 0) { var st = steps[me.cp]; player.position.set(st.cx, st.topY, st.cz); }   // last checkpoint flag
+  else player.position.set(7 + Math.random() * 6, 0, 11 + Math.random() * 3);
+  player.rotation.y = Math.PI; vy = 0; knock.x = knock.z = 0;
 }
 spawn();
 
@@ -315,13 +480,24 @@ var HAND_R = 2.9;
 // ---------- input ----------
 var keys = {}, joy = { x: 0, y: 0, id: null, ox: 0, oy: 0 }, jumpHeld = false;
 var cam = { yaw: Math.PI * 0.15, pitch: 0.42, dist: 10, shake: 0 }, drag = { id: null, x: 0, y: 0 };
+// Release every held key whenever the browser might swallow a keyup (stuck "W keeps walking" bug).
+function releaseKeys() { keys = {}; }
 window.addEventListener('keydown', function (e) {
   if (e.target && e.target.tagName === 'INPUT') return;
+  // On macOS no keyup arrives for keys released while ⌘ is held, so never latch keys during shortcuts.
+  if (e.metaKey || e.ctrlKey || e.altKey || e.key === 'Meta' || e.key === 'Control' || e.key === 'Alt') { releaseKeys(); return; }
   keys[e.code] = true;
+  if (!e.repeat && /^Digit[1-4]$/.test(e.code)) doEmote(+e.code.slice(5));
   if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].indexOf(e.code) >= 0) e.preventDefault();
 });
-window.addEventListener('keyup', function (e) { keys[e.code] = false; });
-window.addEventListener('blur', function () { keys = {}; });
+window.addEventListener('keyup', function (e) {
+  keys[e.code] = false;
+  if (e.key === 'Meta' || e.key === 'Control' || e.key === 'Alt') releaseKeys();
+});
+window.addEventListener('blur', releaseKeys);
+window.addEventListener('contextmenu', releaseKeys);
+document.addEventListener('visibilitychange', function () { if (document.hidden) releaseKeys(); });
+document.addEventListener('focusin', function (e) { if (e.target && e.target.tagName === 'INPUT') releaseKeys(); });
 canvas.addEventListener('pointerdown', function (e) {
   if (e.pointerType === 'touch' && e.clientX < window.innerWidth * 0.45 && joy.id === null) {
     joy.id = e.pointerId; joy.ox = e.clientX; joy.oy = e.clientY; joy.x = joy.y = 0;
@@ -358,6 +534,28 @@ function toast(msg, ms) {
   var t = $('toast'); t.textContent = msg; t.classList.add('on');
   clearTimeout(toastTimer); toastTimer = setTimeout(function () { t.classList.remove('on'); }, ms || 2200);
 }
+function doEmote(idx) {
+  if (game.state === 'menu') return;
+  me.emote = idx; me.emoteT = 2.6; sfx('emote');
+}
+(function buildTools() {
+  var mb = $('muteBtn');
+  function paint() { mb.textContent = muted ? '🔇' : '🔊'; }
+  paint();
+  mb.addEventListener('click', function () {
+    muted = !muted; paint(); try { localStorage.setItem('keyEscapeMute', muted ? '1' : '0'); } catch (e) {}
+    if (!muted) sfx('star');
+    mb.blur();
+  });
+  $('shareBtn').addEventListener('click', function () {
+    var url = location.href, done = function () { toast('🔗 주소를 복사했어요! 친구에게 보내세요'); };
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(url).then(done, function () { toast(url, 5000); });
+    else toast(url, 5000);
+    this.blur();
+  });
+  $('waveBtn').addEventListener('click', function () { doEmote(1); this.blur(); });
+  $('starMax').textContent = stars.length;
+})();
 (function buildMenu() {
   var sw = $('swatches');
   COLORS.forEach(function (c, i) {
@@ -379,10 +577,16 @@ function startGame() {
   me.name = ($('name').value || '').trim().slice(0, 12) || ('장난감' + Math.floor(Math.random() * 90 + 10));
   try { localStorage.setItem('keyEscapeName', me.name); } catch (e) {}
   $('start').classList.add('hidden');
+  if (document.activeElement && document.activeElement.blur) document.activeElement.blur();   // hand the keyboard back to the game
+  releaseKeys();
   beginRun();
 }
 function beginRun() {
-  me.hasKey = false; me.finished = null; spawn();
+  me.hasKey = false; me.finished = null; me.stars = 0; me.cp = -1; me.emote = 0; knock.cd = 0;
+  stars.forEach(function (s) { s.got = false; s.mesh.visible = true; });
+  flags.forEach(function (fl) { fl.cloth.material.color.setHex(0xadb5bd); });
+  $('stars').textContent = '0';
+  spawn();
   game.state = 'play'; game.t0 = performance.now(); game.elapsed = 0;
   hs.state = 'hover'; hs.t = 9; marker.visible = false;
   setGoal();
@@ -437,6 +641,7 @@ function readPeer(pr) {
     x: clamp(a[0], -ROOM, ROOM), y: clamp(a[1], 0, 40), z: clamp(a[2], -ROOM, ROOM), ry: a[3],
     name: (typeof pr.n === 'string' && pr.n.trim() ? pr.n.trim().slice(0, 12) : '친구'),
     c: (typeof pr.c === 'number' && isFinite(pr.c)) ? ((Math.floor(pr.c) % COLORS.length) + COLORS.length) % COLORS.length : 0,
+    e: (typeof pr.e === 'number' && pr.e >= 1 && pr.e <= EMOTES.length) ? Math.floor(pr.e) : 0,
     k: pr.k === true, t: (typeof pr.t === 'number' && isFinite(pr.t) && pr.t > 0) ? pr.t : null
   };
 }
@@ -453,7 +658,7 @@ function syncRemotes(dt) {
         r = { av: makeAvatar(d.c), label: makeLabel(d.name) };
         r.av.add(r.label); r.av.position.set(d.x, d.y, d.z); scene.add(r.av); remotes[p.id] = r;
       }
-      setAvatarColor(r.av, d.c); setLabel(r.label, d.name); r.av.userData.key.visible = d.k; r.av.visible = d.t === null;
+      setAvatarColor(r.av, d.c); setLabel(r.label, d.name); r.av.userData.key.visible = d.k; r.av.visible = d.t === null; showEmote(r.av, d.e);
       var k = 1 - Math.pow(0.0005, dt), pos = r.av.position;
       var moved = Math.hypot(d.x - pos.x, d.z - pos.z);
       pos.x += (d.x - pos.x) * k; pos.y += (d.y - pos.y) * k; pos.z += (d.z - pos.z) * k;
@@ -469,7 +674,7 @@ function sendPresence(now) {
   lastSend = now;
   var p = player.position;
   try {
-    ws.send(JSON.stringify({ n: me.name, c: me.colorIdx, k: me.hasKey, t: me.finished,
+    ws.send(JSON.stringify({ n: me.name, c: me.colorIdx, k: me.hasKey, t: me.finished, e: me.emote,
       p: [Math.round(p.x * 100) / 100, Math.round(p.y * 100) / 100, Math.round(p.z * 100) / 100, Math.round(player.rotation.y * 100) / 100] }));
   } catch (e) {}
 }
@@ -523,6 +728,12 @@ function updatePlayer(dt) {
   var mx = -Math.sin(cam.yaw) * f + Math.cos(cam.yaw) * r;
   var mz = -Math.cos(cam.yaw) * f - Math.sin(cam.yaw) * r;
   var len = Math.hypot(mx, mz), moving = len > 0.08, p = player.position;
+  if (knock.cd > 0) knock.cd -= dt;
+  if (knock.x || knock.z) {      // shoved by a marble
+    p.x += knock.x * dt; p.z += knock.z * dt;
+    var kd = Math.pow(0.02, dt); knock.x *= kd; knock.z *= kd;
+    if (Math.abs(knock.x) + Math.abs(knock.z) < 0.3) knock.x = knock.z = 0;
+  }
   if (moving) {
     var sp = SPEED * Math.min(1, len); mx /= len; mz /= len;
     p.x += mx * sp * dt; p.z += mz * sp * dt;
@@ -532,15 +743,44 @@ function updatePlayer(dt) {
   pushBoxes();
   p.x = clamp(p.x, -ROOM + 0.4, ROOM - 0.4); p.z = clamp(p.z, -ROOM + 0.4, ROOM - 0.4);
 
-  if ((keys.Space || jumpHeld) && grounded) { vy = JUMP_V; grounded = false; }
+  // jump, with a short grace period after walking off an edge (feels fairer on stairs)
+  if ((keys.Space || jumpHeld) && (grounded || airT < 0.1) && vy <= 0.01) { vy = JUMP_V; grounded = false; airT = 1; sfx('jump'); }
   vy -= GRAVITY * dt; p.y += vy * dt;
   var sup = supportAt(p.x, p.y, p.z);
-  if (p.y <= sup && vy <= 0.01) { p.y = sup; vy = 0; grounded = true; } else grounded = false;
+  if (p.y <= sup && vy <= 0.01) { p.y = sup; vy = 0; grounded = true; airT = 0; } else { grounded = false; airT += dt; }
   animateLegs(player, moving && grounded, dt);
+
+  // stars
+  for (var si = 0; si < stars.length; si++) {
+    var s = stars[si];
+    if (!s.got && Math.hypot(p.x - s.x, p.z - s.z) < 1.1 && Math.abs(p.y + 0.9 - s.y) < 1.3) {
+      s.got = true; s.mesh.visible = false; me.stars++; $('stars').textContent = me.stars;
+      sfx('star'); burst(s.x, s.y, s.z, 0xffe066, 14, 4);
+      if (me.stars === stars.length) toast('⭐ 별을 전부 모았어요!', 2400);
+    }
+  }
+  // checkpoint flags
+  if (grounded) for (var fi = 0; fi < flags.length; fi++) {
+    var fl = flags[fi], st = steps[fl.idx];
+    if (fl.idx > me.cp && Math.abs(p.y - st.topY) < 0.2 && Math.hypot(p.x - st.cx, p.z - st.cz) < 2.6) {
+      me.cp = fl.idx; fl.cloth.material.color.setHex(0xff4d6d); sfx('flag');
+      toast('🚩 체크포인트! 잡혀도 여기서 다시 시작해요', 2400);
+    }
+  }
+  // rolling marbles
+  if (knock.cd <= 0) for (var mi = 0; mi < marbles.length; mi++) {
+    var mb = marbles[mi], mp = mb.mesh.position;
+    if (mb.live && Math.hypot(p.x - mp.x, p.z - mp.z) < MARBLE_R + 0.45 && p.y < mp.y + MARBLE_R * 0.6 && p.y + 1.6 > mp.y - MARBLE_R) {
+      knock.x = mb.dx * 11; knock.z = mb.dz * 11; knock.cd = 1.2; vy = 6.5; grounded = false; airT = 1;
+      cam.shake = Math.max(cam.shake, 0.25); sfx('hit'); toast('🔴 구슬에 맞았어요! 점프로 피해요', 1800);
+      break;
+    }
+  }
 
   // key pickup
   if (!me.hasKey && Math.hypot(p.x - keyPos.x, p.z - keyPos.z) < 1.5 && Math.abs(p.y + 1 - keyPos.y) < 2.2) {
     me.hasKey = true; setGoal(); toast('🔑 황금 열쇠 획득! 이제 쥐구멍으로 탈출하세요!', 2800);
+    sfx('key'); burst(keyPos.x, keyPos.y, keyPos.z, 0xffd43b, 30, 6);
   }
   // escape
   if (me.hasKey && p.y < 1 && Math.hypot(p.x - EXIT.x, p.z - EXIT.z) < 1.9) finish();
@@ -553,18 +793,26 @@ function finish() {
   me.finished = Math.round(game.elapsed * 10) / 10; game.state = 'done';
   marker.visible = false; hs.state = 'hover'; hs.t = 9;
   $('result').textContent = fmt(me.finished);
+  var best = null; try { best = parseFloat(localStorage.getItem('keyEscapeBest')); } catch (e) {}
+  var isNew = !(best > 0) || me.finished < best;
+  if (isNew) { try { localStorage.setItem('keyEscapeBest', String(me.finished)); } catch (e) {} }
+  $('endStats').textContent = '⭐ ' + me.stars + '/' + stars.length + ' · ' + (isNew ? '🎉 내 최고 기록!' : '내 최고 기록 ' + fmt(best));
+  sfx('win');
+  var pp = player.position;
+  [0xff6b6b, 0xffd43b, 0x4dabf7, 0x69db7c].forEach(function (c) { burst(pp.x, pp.y + 1.5, pp.z - 1.5, c, 24, 8); });
   $('end').classList.remove('hidden');
 }
 function caught() {
-  var hadKey = me.hasKey; me.hasKey = false; setGoal(); spawn(); cam.shake = 0.5;
-  toast(hadKey ? '✋ 잡혔어요! 열쇠를 빼앗기고 처음으로…' : '✋ 잡혔어요! 처음 자리로 돌아갑니다', 2600);
+  var hadKey = me.hasKey, back = me.cp >= 0 ? '체크포인트로' : '처음으로';
+  me.hasKey = false; setGoal(); spawn(); cam.shake = 0.5; sfx('caught');
+  toast(hadKey ? '✋ 잡혔어요! 열쇠를 빼앗기고 ' + back + '…' : '✋ 잡혔어요! ' + back + ' 돌아갑니다', 2600);
 }
 function updateHand(dt) {
   var p = player.position, hp = hand.position, active = game.state === 'play';
   if (hs.state === 'hover') {
     var k = 1 - Math.pow(0.2, dt);
     hp.x += (p.x * 0.6 - hp.x) * k; hp.z += (p.z * 0.6 - 4 - hp.z) * k; hp.y += (p.y + 17 - hp.y) * k;
-    if (active) { hs.t -= dt; if (hs.t <= 0) { hs.state = 'warn'; hs.t = 1.5; marker.visible = true; } }
+    if (active) { hs.t -= dt; if (hs.t <= 0) { hs.state = 'warn'; hs.t = 1.5; marker.visible = true; sfx('warn'); } }
   } else if (hs.state === 'warn') {
     hs.t -= dt;
     if (hs.t > 0.55) { hs.tx = p.x; hs.tz = p.z; hs.ty = grounded ? p.y : supportAt(p.x, p.y, p.z); }   // tracks you, then locks
@@ -578,12 +826,15 @@ function updateHand(dt) {
     var u = clamp(1 - hs.t / 0.22, 0, 1);
     hp.y = hs.fromY + (hs.ty + 0.7 - hs.fromY) * u * u;
     if (hs.t <= 0) {
-      cam.shake = Math.max(cam.shake, 0.3); marker.visible = false;
+      cam.shake = Math.max(cam.shake, 0.3); marker.visible = false; if (active) sfx('slam');
       if (active && Math.hypot(p.x - hs.tx, p.z - hs.tz) < HAND_R && Math.abs(p.y - hs.ty) < 2.4) caught();
       hs.state = 'rest'; hs.t = 0.8;
     }
   } else if (hs.state === 'rest') {
-    hs.t -= dt; if (hs.t <= 0) { hs.state = 'hover'; hs.t = 6 + Math.random() * 4; }
+    hs.t -= dt; if (hs.t <= 0) { hs.state = 'hover';
+      // the kid gets impatient the higher you climb, and furious once you hold the key
+      var hurry = me.hasKey ? 1 : clamp(p.y / 16, 0, 1) * 0.6;
+      hs.t = (6 - 2.6 * hurry) + Math.random() * (4 - 1.8 * hurry); }
   }
   // the kid watches you
   var ex = clamp(p.x / ROOM, -1, 1) * 0.55, ey = clamp((p.y - 8) / 16, -1, 1) * 0.5;
@@ -605,7 +856,10 @@ function frame(now) {
   var dt = Math.min(0.05, (now - last) / 1000); last = now;
   if (game.state === 'play') { game.elapsed = (now - game.t0) / 1000; updatePlayer(dt); }
   else if (game.state === 'menu') { cam.yaw += dt * 0.08; }
-  updateHand(dt);
+  updateHand(dt); updateMarbles(dt); updateBursts(dt);
+  if (me.emoteT > 0) { me.emoteT -= dt; if (me.emoteT <= 0) me.emote = 0; }
+  showEmote(player, me.emote);
+  for (var sI = 0; sI < stars.length; sI++) { stars[sI].mesh.rotation.y += dt * 2.4; stars[sI].mesh.position.y = stars[sI].y + Math.sin(now * 0.004 + sI) * 0.12; }
   var list = syncRemotes(dt);
   sendPresence(now);
 
