@@ -38,6 +38,34 @@ const ITEMS = { boost: '🚀', spring: '🦘', banana: '🍌', freeze: '❄️' 
 const HATS = [['없음', 0, '🚫'], ['고깔', 5, '🎉'], ['야구모자', 15, '🧢'], ['신사모', 30, '🎩'], ['고양이 귀', 50, '🐱'], ['프로펠러', 80, '🚁']];   // name, stars needed, icon
 const DASH_V = 20, DASH_CD = 2.2;
 const CHEST = { x: -14.3, z: -14.3 };
+// surprise events: the whole room gets the same one, picked from the clock
+const EVENTS = [
+  { id: 'lowgrav', icon: '🌙', name: '저중력', tip: '점프가 훨씬 높아져요' },
+  { id: 'storm', icon: '🔴', name: '구슬 폭풍', tip: '구슬이 두 배로 굴러와요' },
+  { id: 'starrain', icon: '⭐', name: '별 비', tip: '보너스 별을 주워요' },
+  { id: 'sneeze', icon: '🤧', name: '아이의 재채기', tip: '바람에 밀려나요' },
+  { id: 'dark', icon: '🌑', name: '정전', tip: '불이 꺼졌어요' },
+  { id: 'speed', icon: '⚡', name: '스피드 타임', tip: '모두 빨라져요' },
+];
+const EV_PERIOD = 50000, EV_WARN = 5000, EV_LEN = 15000;
+const ev = { on: null, phase: 'idle', warnSlot: -1, startT: 0, force: null, grav: 1, speed: 1, storm: false, wind: 0, bonus: [], sky: null, lamp: null, pulse: false };
+const ACH = [
+  ['first', '첫 탈출', '처음으로 탈출하기'],
+  ['fast', '날쌘돌이', '2분 안에 탈출하기'],
+  ['faster', '번개', '1분 15초 안에 탈출하기'],
+  ['untouched', '손은 눈보다 느리다', '한 번도 잡히지 않고 탈출하기'],
+  ['allstars', '별 수집가', '한 판에 별 14개 모두 모으기'],
+  ['stars50', '별부자', '별을 누적 50개 모으기'],
+  ['bonus', '별똥별', '별 비 이벤트에서 보너스 별 줍기'],
+  ['trampoline', '곡예사', '바닥 트램펄린으로 계단에 착지하기'],
+  ['island', '구름 위 산책', '구름섬에 올라서기'],
+  ['chest', '열려라 참깨', '보물상자 열기'],
+  ['shield', '철벽', '방패로 손 막기'],
+  ['dodger', '피하기 달인', '손을 누적 20번 피하기'],
+  ['bumper', '박치기왕', '박치기를 누적 5번 성공하기'],
+  ['thief', '괴도', '쟁탈전에서 조각 빼앗기'],
+  ['winner', '쟁탈전 승리', '쟁탈전에서 한 판 이기기'],
+];
 const EMOTES = ['👋', '😂', '😱', '👍'];
 const MARBLE_R = 0.6, MARBLE_PERIOD = 39000, MARBLE_N = 3;
 const HAND_R = 2.9;
@@ -70,7 +98,7 @@ scene.background = canvasTex(16, 256, (c, w, h) => {
 scene.fog = new THREE.Fog(C(0xdcecff), 70, 190);
 
 const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 400);
-scene.add(new THREE.HemisphereLight(C(0xffffff), C(0xe6cfae), 0.62));
+const hemi = new THREE.HemisphereLight(C(0xffffff), C(0xe6cfae), 0.62); scene.add(hemi);
 const sun = new THREE.DirectionalLight(C(0xfff1d6), 0.78);
 sun.position.set(18, 42, 14);
 sun.shadow.mapSize.set(2048, 2048);
@@ -323,10 +351,15 @@ const marbles = [];
   m.add(mesh(new THREE.TorusGeometry(MARBLE_R * 0.98, 0.07, 6, 20), basic(0xffffff)));
   scene.add(m); marbles.push({ mesh: m, off: (i - 1) * 0.85, dx: 0, dz: 0, live: false });
 });
+[0, 1, 2].forEach((i) => {       // extra marbles that only roll during the 구슬 폭풍 event
+  const m = mesh(new THREE.SphereGeometry(MARBLE_R, 20, 14), std(0x9775fa, 0.15, 0.2)); m.castShadow = true; m.visible = false;
+  m.add(mesh(new THREE.TorusGeometry(MARBLE_R * 0.98, 0.07, 6, 20), basic(0xffffff)));
+  scene.add(m); marbles.push({ mesh: m, off: (1 - i) * 0.6, dx: 0, dz: 0, live: false, storm: true });
+});
 function updateMarbles() {
   const top = steps.length - 2, lowest = 3, span = top - lowest;
   marbles.forEach((mb, i) => {
-    const ph = ((Date.now() + i * MARBLE_PERIOD / marbles.length) % MARBLE_PERIOD) / MARBLE_PERIOD;
+    const ph = ((Date.now() + (mb.storm ? i - 2.5 : i) * MARBLE_PERIOD / MARBLE_N) % MARBLE_PERIOD) / MARBLE_PERIOD;
     const u = top - ph * span, a = Math.floor(u), f = u - a, s0 = steps[a], s1 = steps[Math.min(a + 1, steps.length - 1)];
     const x = lerp(s0.cx, s1.cx, f) + lerp(s0.rx, s1.rx, f) * mb.off, z = lerp(s0.cz, s1.cz, f) + lerp(s0.rz, s1.rz, f) * mb.off;
     const y = lerp(s0.topY, s1.topY, f) + MARBLE_R, pos = mb.mesh.position;
@@ -335,6 +368,7 @@ function updateMarbles() {
     pos.set(x, y, z);
     const sc = Math.min(1, ph * 30, (1 - ph) * 30); mb.mesh.scale.setScalar(Math.max(0.01, sc));   // fade in at the top, pop at the bottom
     mb.live = sc > 0.8;
+    if (mb.storm) { mb.mesh.visible = ev.storm; if (!ev.storm) mb.live = false; }
   });
 }
 
@@ -425,6 +459,9 @@ function sfx(name) {
   else if (name === 'win') [523, 659, 784, 659, 784, 1047].forEach((f, i) => tone(f, 0.25, 'triangle', 0.12, 0, i * 0.12));
   else if (name === 'emote') tone(700, 0.09, 'sine', 0.06, 900);
   else if (name === 'dash') tone(900, 0.16, 'sawtooth', 0.035, 250);
+  else if (name === 'event') [659, 880, 1175].forEach((f, i) => tone(f, 0.18, 'square', 0.06, 0, i * 0.08));
+  else if (name === 'sneeze') { tone(500, 0.12, 'sawtooth', 0.05, 900); tone(700, 0.5, 'sawtooth', 0.07, 120, 0.12); }
+  else if (name === 'ach') [784, 988, 1175, 1568].forEach((f, i) => tone(f, 0.2, 'triangle', 0.1, 0, i * 0.07));
   else if (name === 'open') [392, 523, 659, 784].forEach((f, i) => tone(f, 0.3, 'triangle', 0.1, 0, i * 0.1));
   else if (name === 'join') { tone(587, 0.1, 'sine', 0.05); tone(784, 0.14, 'sine', 0.05, 0, 0.09); }
 }
@@ -599,7 +636,8 @@ function setLabel(sp, text) {
 // ---------- local player ----------
 const me = { name: '나', colorIdx: Math.floor(Math.random() * COLORS.length), hasKey: false, order: [], finished: null, stars: 0, cp: -1, emote: 0, emoteT: 0, shield: false,
   item: null, boostT: 0, frozenT: 0, dashCd: 0, hat: 0 };
-const dashVec = { x: 0, z: 0 };
+const dashVec = { x: 0, z: 0 }, dashDir = { x: 0, z: 1 }, run = { caught: false, fromPad: false };
+let dashHit = 0;
 let ridePlat = null, totalStars = Math.max(0, Math.floor(+store.get('totalStars', 0)) || 0);
 const player = makeAvatar(me.colorIdx); scene.add(player);
 const vel = { x: 0, z: 0 }, knock = { x: 0, z: 0, cd: 0 }, squash = { s: 1, v: 0 };
@@ -793,6 +831,7 @@ function dash() {
   const l = Math.hypot(dx, dz) || 1;
   dashVec.x = dx / l * DASH_V; dashVec.z = dz / l * DASH_V; me.dashCd = DASH_CD;
   if (!grounded && vy < 2) vy = 2;                    // a little lift, so an air-dash can save a jump
+  dashDir.x = dx / l; dashDir.z = dz / l; dashHit = 0.35;      // bumping into someone during a dash shoves them
   squash.s = 0.8; sfx('dash'); burst(player.position.x, player.position.y + 0.6, player.position.z, 0xffffff, 8, 2, 0.2);
 }
 function gotFrozen(byName) {
@@ -883,6 +922,11 @@ function toggleSettings(force) {
     toggleSettings(false);
   });
   $('bendNext').addEventListener('click', groupStart);
+  const achToggle = (show) => { $('achPanel').classList.toggle('hidden', !show); if (show) renderAch(); };
+  $('achBtn').addEventListener('click', () => achToggle(true));
+  $('achBtn2').addEventListener('click', () => { toggleSettings(false); achToggle(true); });
+  $('achClose').addEventListener('click', () => achToggle(false));
+  $('achPanel').addEventListener('click', (e) => { if (e.target === $('achPanel')) achToggle(false); });
 
   $('shareBtn').addEventListener('click', (e) => {
     const url = location.href, done = () => toast('🔗 주소를 복사했어요! 친구에게 보내세요');
@@ -920,7 +964,7 @@ function beginRun(countdown) {
   $('stars').textContent = '0'; $('time').textContent = '0.0';
   $('end').classList.add('hidden'); $('bend').classList.add('hidden'); $('spectate').classList.add('hidden'); spec.on = false;
   if (battle.on) { me.order = [0, 1, 2].filter((i) => myId !== null && battle.pieces[i] === myId); me.hasKey = me.order.length === 3; }
-  grabCd = stealCd = escapeCd = 0;
+  grabCd = stealCd = escapeCd = 0; run.caught = false; run.fromPad = false; dashHit = 0;
   releaseKeys(); spawn(); player.visible = true;
   cam.yaw = Math.PI * 0.15; cam.pitch = 0.42;
   game.state = 'countdown'; game.cdEnd = clock() + (countdown || 3) * 1000; game.lastCount = null; game.elapsed = 0;
@@ -986,7 +1030,7 @@ function shove(dx, dz, power, up, msg) {
 function physStep(dt, ix, iz) {
   const p = player.position, hasInput = Math.hypot(ix, iz) > 0.08;
   // horizontal: accelerate toward the wanted velocity (snappy on the ground, floaty in the air)
-  const top = SPEED * (me.boostT > 0 ? 1.6 : 1) * (me.frozenT > 0 ? 0.35 : 1) * (battle.on ? 1 - 0.06 * me.order.length : 1);   // carrying pieces in 쟁탈전 slows you a little
+  const top = SPEED * (me.boostT > 0 ? 1.6 : 1) * (me.frozenT > 0 ? 0.35 : 1) * (battle.on ? 1 - 0.06 * me.order.length : 1) * ev.speed;   // carrying pieces in 쟁탈전 slows you a little
   const tx = hasInput ? ix * top : 0, tz = hasInput ? iz * top : 0;
   const acc = (grounded ? (hasInput ? 60 : 75) : (hasInput ? 24 : 5)) * dt;
   const dvx = tx - vel.x, dvz = tz - vel.z, dl = Math.hypot(dvx, dvz);
@@ -999,7 +1043,7 @@ function physStep(dt, ix, iz) {
     const dd = Math.pow(0.0008, dt); dashVec.x *= dd; dashVec.z *= dd;
     if (Math.abs(dashVec.x) + Math.abs(dashVec.z) < 0.4) dashVec.x = dashVec.z = 0;
   }
-  p.x += (vel.x + knock.x + dashVec.x) * dt; p.z += (vel.z + knock.z + dashVec.z) * dt;
+  p.x += (vel.x + knock.x + dashVec.x) * dt; p.z += (vel.z + knock.z + dashVec.z + ev.wind) * dt;
   pushBoxes();
   p.x = clamp(p.x, -ROOM + 0.4, ROOM - 0.4); p.z = clamp(p.z, -ROOM + 0.4, ROOM - 0.4);
 
@@ -1009,7 +1053,7 @@ function physStep(dt, ix, iz) {
     vy = JUMP_V * (me.frozenT > 0 ? 0.75 : 1); grounded = false; airT = 1; jumpBuf = 0; squash.s = 1.25; sfx('jump');
   }
   // letting go early makes a shorter hop
-  const g = GRAVITY * ((vy > 0 && !held && bounceT <= 0) ? 2.3 : 1);
+  const g = GRAVITY * ev.grav * ((vy > 0 && !held && bounceT <= 0) ? 2.3 : 1);
   const prevY = p.y;
   vy -= g * dt; p.y += vy * dt;
   const sup = supportAt(p.x, Math.max(prevY, p.y), p.z);
@@ -1019,11 +1063,12 @@ function physStep(dt, ix, iz) {
       if (fallSpeed > 7) { squash.s = clamp(1 - fallSpeed * 0.022, 0.62, 1); sfx('land'); burst(p.x, sup + 0.1, p.z, 0xffffff, 6, 1.6, 0.2); }
     }
     p.y = sup; vy = 0; grounded = true; airT = 0;
+    if (run.fromPad) { if (sup > 4) unlock('trampoline'); run.fromPad = false; }
     // trampolines
     for (let i = 0; i < pads.length; i++) {
       const pd = pads[i];
       if (Math.abs(sup - pd.top) < 0.01 && Math.hypot(p.x - pd.x, p.z - pd.z) <= pd.r - 0.15) {
-        vy = pd.v; grounded = false; airT = 1; bounceT = 1.5; pd.bounce = 1; squash.s = 1.35; sfx('boing');
+        vy = pd.v; grounded = false; airT = 1; bounceT = 1.5; run.fromPad = i < 2; pd.bounce = 1; squash.s = 1.35; sfx('boing');
         burst(p.x, pd.top + 0.1, p.z, 0x74c0fc, 10, 3);
         if (!padTipShown) { padTipShown = true; toast('🎪 트램펄린! 공중에서 방향을 잡아 계단에 착지해요', 2800); }
       }
@@ -1053,6 +1098,7 @@ function updatePlayer(dt) {
   const p = player.position, sp = Math.hypot(vel.x, vel.z), moving = sp > 0.6;
   ridePlat = null;
   if (grounded) for (let i = 0; i < plats.length; i++) { const pl = plats[i]; if (Math.abs(p.y - pl.top) < 0.02 && Math.hypot(p.x - pl.x, p.z - pl.z) <= pl.r) ridePlat = pl; }
+  if (ridePlat === plats[0]) unlock('island');
   if (moving) player.rotation.y += angDiff(Math.atan2(vel.x, vel.z), player.rotation.y) * Math.min(1, dt * 14);
   animateAvatar(player, moving, grounded, dt);
   // squash & stretch spring, a little forward lean
@@ -1068,6 +1114,7 @@ function updatePlayer(dt) {
     if (!s.got && Math.hypot(p.x - s.x, p.z - s.z) < 1.1 && Math.abs(p.y + 0.9 - s.y) < 1.3) {
       s.got = true; s.mesh.visible = false; me.stars++; $('stars').textContent = me.stars;
       totalStars++; store.set('totalStars', totalStars);
+      if (totalStars >= 50) unlock('stars50'); if (me.stars === stars.length) unlock('allstars');
       sfx('star'); burst(s.x, s.y, s.z, 0xffe066, 14, 4);
       if (me.stars === stars.length) toast('⭐ 별을 전부 모았어요!', 2400);
     }
@@ -1144,6 +1191,21 @@ function updatePlayer(dt) {
       }
     }
   }
+  // 박치기: dash into another player to shove them
+  if (dashHit > 0) {
+    dashHit -= dt;
+    if (netOk) for (const id in remotes) {
+      const r = remotes[id]; if (!r.av.visible) continue;
+      const rp = r.av.position;
+      if (Math.hypot(p.x - rp.x, p.y - rp.y, p.z - rp.z) < 1.5) {
+        dashHit = 0;
+        try { ws.send(JSON.stringify({ cmd: 'bump', to: id, d: [dashDir.x, dashDir.z] })); } catch (e) { /* offline */ }
+        sfx('hit'); burst(rp.x, rp.y + 1, rp.z, 0xffffff, 14, 5); toast('💥 박치기!', 900); cam.shake = Math.max(cam.shake, 0.15);
+        countAch('bump', 5, 'bumper');
+        break;
+      }
+    }
+  }
   // the locked chest: tell the player what to do
   if (!chest.open && !chest.warned && p.y < 1 && Math.hypot(p.x - CHEST.x, p.z - CHEST.z) < 3.2) {
     chest.warned = true; toast('🧰 잠긴 보물상자! 바닥의 빨간 버튼 두 개를 블록으로 눌러요 (친구가 밟아도 돼요)', 4200);
@@ -1161,6 +1223,7 @@ function updatePlayer(dt) {
 }
 function finish() {
   me.finished = Math.round(game.elapsed * 10) / 10; game.state = 'done';
+  unlock('first'); if (me.finished <= 120) unlock('fast'); if (me.finished <= 75) unlock('faster'); if (!run.caught) unlock('untouched');
   marker.visible = false; hs.state = 'hover'; hs.t = 9; releaseKeys();
   $('result').textContent = fmt(me.finished);
   let best = +store.get('best', 0);
@@ -1178,8 +1241,9 @@ function finish() {
 function caught() {
   if (me.shield) {
     me.shield = false; sfx('pop'); burst(player.position.x, player.position.y + 1, player.position.z, 0x74c0fc, 26, 6);
-    toast('🛡 방패가 막아줬어요!', 2000); cam.shake = 0.4; return;
+    toast('🛡 방패가 막아줬어요!', 2000); cam.shake = 0.4; unlock('shield'); return;
   }
+  run.caught = true;
   const back = me.cp >= 0 ? '체크포인트로' : '처음으로';
   let lost = null;
   if (battle.on) {
@@ -1216,6 +1280,7 @@ function updateHand(dt, now) {
       cam.shake = Math.max(cam.shake, 0.3); marker.visible = false;
       if (active) { sfx('slam'); burst(hs.tx, hs.ty + 0.2, hs.tz, 0xffffff, 18, 5, 0.22); }
       if (active && Math.hypot(p.x - hs.tx, p.z - hs.tz) < HAND_R && Math.abs(p.y - hs.ty) < 2.4) caught();
+      else if (active && Math.hypot(p.x - hs.tx, p.z - hs.tz) < 9) countAch('dodge', 20, 'dodger');
       hs.state = 'rest'; hs.t = 0.8;
     }
   } else if (hs.state === 'rest') {
@@ -1322,13 +1387,13 @@ function applyBattle(b) {
     if (L.by === myId) { sfx('key'); burst(pp.x, pp.y + 1.5, pp.z, 0xffd43b, 24, 5); toast(me.hasKey ? '🔑 다 모았어요! 쥐구멍으로 도망쳐요!' : '🔑 ' + pcName + '조각 획득! 빼앗기지 않게 조심!', 2400); }
     else feed('🔑 ' + nameOf(L.by) + ' ' + pcName + '조각');
   } else if (L.type === 'steal') {
-    if (L.by === myId) { sfx('key'); burst(pp.x, pp.y + 1.5, pp.z, 0xffd43b, 24, 5); toast('😈 ' + nameOf(L.from) + ' 님의 조각을 빼앗았어요!' + (me.hasKey ? ' 쥐구멍으로!' : ''), 2400); }
+    if (L.by === myId) { unlock('thief'); sfx('key'); burst(pp.x, pp.y + 1.5, pp.z, 0xffd43b, 24, 5); toast('😈 ' + nameOf(L.from) + ' 님의 조각을 빼앗았어요!' + (me.hasKey ? ' 쥐구멍으로!' : ''), 2400); }
     else if (L.from === myId) {
       const r = remotes[L.by], dx = r ? pp.x - r.av.position.x : 1, dz = r ? pp.z - r.av.position.z : 0;
       shove(dx, dz, 9, 6, '😱 ' + nameOf(L.by) + ' 님에게 조각을 빼앗겼어요! 쫓아가요!');
     } else feed('😈 ' + nameOf(L.by) + ' → ' + nameOf(L.from) + ' 조각 빼앗기!');
   } else if (L.type === 'drop' && L.by !== myId) feed('✋ ' + nameOf(L.by) + ' 조각을 놓쳤어요');
-  else if (L.type === 'win') showBattleEnd(L.by);
+  else if (L.type === 'win') { if (L.by === myId) unlock('winner'); showBattleEnd(L.by); }
 }
 function showBattleEnd(winner) {
   game.state = 'done'; marker.visible = false; hs.state = 'hover'; hs.t = 9; releaseKeys();
@@ -1372,6 +1437,11 @@ function connect() {
     if (Array.isArray(m.traps)) m.traps.forEach((t) => { if (t && typeof t.id === 'string' && okP(t.p)) addTrap(t.id, t.by, t.p); });
     if (m.ev === 'trap' && m.t && typeof m.t.id === 'string' && okP(m.t.p)) addTrap(m.t.id, m.t.by, m.t.p);
     if (m.ev === 'trapGone' && typeof m.id === 'string') removeTrap(m.id);
+    if (m.ev === 'bump' && game.state === 'play' && Array.isArray(m.d) && typeof m.d[0] === 'number' && typeof m.d[1] === 'number' && isFinite(m.d[0]) && isFinite(m.d[1])) {
+      const who = typeof m.n === 'string' ? m.n.slice(0, 12) : '친구';
+      if (me.shield) { me.shield = false; sfx('pop'); toast('🛡 방패가 ' + who + ' 님의 박치기를 막았어요!', 1800); }
+      else if (knock.cd <= 0) shove(m.d[0], m.d[1], 11, 6.5, '💥 ' + who + ' 님의 박치기!');
+    }
     if (m.ev === 'freeze' && okP(m.p) && m.by !== myId && game.state === 'play') {
       const pp = player.position;
       burst(m.p[0], m.p[1] + 1, m.p[2], 0xa5d8ff, 40, 9);
@@ -1518,6 +1588,115 @@ function updateCamera(dt, now, list) {
   camera.lookAt(tx, ty, tz);
 }
 
+// ---------- achievements (kept in this browser) ----------
+const ach = { got: store.get('ach', {}) || {}, cnt: store.get('achCnt', {}) || {} };
+let achTimer = null;
+function renderAch() {
+  const n = ACH.filter((a) => ach.got[a[0]]).length, label = '🏅 업적 ' + n + '/' + ACH.length;
+  $('achBtn').textContent = label; $('achBtn2').textContent = label;
+  const ol = $('achList'); ol.textContent = '';
+  ACH.forEach((a) => {
+    const li = document.createElement('li'); if (ach.got[a[0]]) li.className = 'got';
+    const ic = document.createElement('span'); ic.className = 'ic'; ic.textContent = ach.got[a[0]] ? '🏅' : '🔒';
+    const tx = document.createElement('span'); const b = document.createElement('b'); b.textContent = a[1]; tx.appendChild(b);
+    const cnt = a[0] === 'dodger' ? ' (' + Math.min(20, ach.cnt.dodge || 0) + '/20)' : a[0] === 'bumper' ? ' (' + Math.min(5, ach.cnt.bump || 0) + '/5)' : a[0] === 'stars50' ? ' (' + Math.min(50, totalStars) + '/50)' : '';
+    tx.appendChild(document.createTextNode(' ' + a[2] + cnt));
+    li.appendChild(ic); li.appendChild(tx); ol.appendChild(li);
+  });
+}
+function unlock(id) {
+  if (ach.got[id]) return;
+  const a = ACH.find((x) => x[0] === id); if (!a) return;
+  ach.got[id] = 1; store.set('ach', ach.got); renderAch();
+  const el = $('achPop'); el.textContent = '🏅 업적 달성! ' + a[1]; el.classList.add('on');
+  clearTimeout(achTimer); achTimer = setTimeout(() => el.classList.remove('on'), 3400);
+  sfx('ach');
+}
+function countAch(key, need, id) {
+  if (ach.got[id]) return;
+  ach.cnt[key] = (ach.cnt[key] || 0) + 1; store.set('achCnt', ach.cnt);
+  if (ach.cnt[key] >= need) unlock(id);
+}
+renderAch();
+
+// ---------- surprise events ----------
+function eventAt(slot) {
+  // a shuffled bag per six slots: every event comes up once per round, and never twice in a row
+  const n = EVENTS.length, bag = (block) => {
+    let r = (Math.imul(block, 0x9E3779B1) >>> 0) || 1; const a = EVENTS.map((_, k) => k);
+    for (let k = n - 1; k > 0; k--) { r = (Math.imul(r, 1664525) + 1013904223) >>> 0; const m = r % (k + 1), t = a[k]; a[k] = a[m]; a[m] = t; }
+    return a;
+  };
+  const block = Math.floor(slot / n), cur = bag(block), prev = bag(block - 1);
+  if (cur[0] === prev[n - 1]) { const t = cur[0]; cur[0] = cur[1]; cur[1] = t; }
+  return EVENTS[cur[slot - block * n]];
+}
+const bonusGeo = new THREE.OctahedronGeometry(0.5), bonusMat = std(0xff8fab, 0.25, 0.3); bonusMat.emissive = C(0x8a2a4a);
+function startEvent(id, seed) {
+  ev.startT = Date.now();
+  if (id === 'lowgrav') ev.grav = 0.42;
+  else if (id === 'speed') ev.speed = 1.4;
+  else if (id === 'storm') ev.storm = true;
+  else if (id === 'dark') {
+    ev.sky = scene.background; scene.background = C(0x0b0d1a); scene.fog.color.copy(C(0x0b0d1a));
+    hemi.intensity = 0.06; sun.intensity = 0.04;
+    if (!ev.lamp) { ev.lamp = new THREE.PointLight(C(0xfff1c2), 1.5, 15); ev.lamp.position.y = 2.2; player.add(ev.lamp); }
+    ev.lamp.visible = true;
+  } else if (id === 'starrain') {
+    let r = (seed >>> 0) || 1; const rnd = () => { r = (Math.imul(r, 1664525) + 1013904223) >>> 0; return r / 4294967296; };
+    for (let i = 0; i < 10; i++) {
+      const st = steps[2 + Math.floor(rnd() * (steps.length - 4))], side = rnd() < 0.5 ? -1 : 1;
+      const m = mesh(bonusGeo, bonusMat), x = st.cx + st.rx * side * 0.9, z = st.cz + st.rz * side * 0.9, y = st.topY + 1.2;
+      m.position.set(x, y + 14, z); scene.add(m); ev.bonus.push({ mesh: m, x, y, z });
+    }
+  }
+}
+function endEvent(id) {
+  ev.grav = 1; ev.speed = 1; ev.storm = false; ev.wind = 0; ev.pulse = false;
+  if (id === 'dark') { scene.background = ev.sky; scene.fog.color.copy(C(0xdcecff)); hemi.intensity = 0.62; sun.intensity = 0.78; if (ev.lamp) ev.lamp.visible = false; }
+  ev.bonus.forEach((b) => scene.remove(b.mesh)); ev.bonus.length = 0;
+}
+function updateEvents(dt) {
+  const t = Date.now(), slot = Math.floor(t / EV_PERIOD), into = t - slot * EV_PERIOD;
+  let cur = eventAt(slot), phase = into < EV_WARN ? 'warn' : (into < EV_WARN + EV_LEN ? 'on' : 'idle'), left = EV_WARN + EV_LEN - into, seed = slot;
+  if (ev.force) {
+    if (t > ev.force.until) ev.force = null;
+    else { cur = ev.force.e; phase = 'on'; left = ev.force.until - t; seed = 7; }
+  }
+  if (game.state !== 'play') phase = 'idle';
+  const on = phase === 'on' ? cur.id : null;
+  if (on !== ev.on) {
+    if (ev.on) endEvent(ev.on);
+    ev.on = on;
+    if (on) { startEvent(on, seed); sfx('event'); toast(cur.icon + ' ' + cur.name + '! ' + cur.tip, 2600); }
+  }
+  if (phase === 'warn' && ev.warnSlot !== slot) { ev.warnSlot = slot; sfx('tick'); }
+  const el = $('evBanner');
+  if (phase === 'idle') el.classList.add('hidden');
+  else {
+    el.classList.remove('hidden'); el.classList.toggle('warn', phase === 'warn');
+    $('evText').textContent = phase === 'warn' ? '곧 시작: ' + cur.icon + ' ' + cur.name : cur.icon + ' ' + cur.name + ' · ' + Math.ceil(left / 1000) + '초';
+  }
+  if (on === 'sneeze') {       // three gusts that push everyone away from the kid
+    const pulse = ((t - ev.startT) % 5000) < 1800;
+    if (pulse && !ev.pulse) { sfx('sneeze'); cam.shake = Math.max(cam.shake, 0.3); }
+    ev.pulse = pulse; ev.wind = pulse ? 5.5 : 0;
+    if (pulse && Math.random() < dt * 30) { const p = player.position; burst(p.x + (Math.random() - 0.5) * 8, p.y + 1 + Math.random() * 2, p.z - 6, 0xffffff, 3, 2, 0.18); }
+  }
+  if (ev.bonus.length) {
+    const p = player.position;
+    for (let i = ev.bonus.length - 1; i >= 0; i--) {
+      const b = ev.bonus[i]; b.mesh.rotation.y += dt * 4;
+      b.mesh.position.y = Math.max(b.y, b.mesh.position.y - dt * 9);       // falls from the sky, then hovers
+      if (Math.hypot(p.x - b.x, p.z - b.z) < 1.2 && Math.abs(p.y + 0.9 - b.mesh.position.y) < 1.4) {
+        scene.remove(b.mesh); ev.bonus.splice(i, 1);
+        totalStars++; store.set('totalStars', totalStars); if (totalStars >= 50) unlock('stars50'); unlock('bonus');
+        sfx('star'); burst(b.x, b.y, b.z, 0xff8fab, 16, 4); toast('⭐ 보너스 별 +1 (모자 해금용)', 1500);
+      }
+    }
+  }
+}
+
 // ---------- floor buttons + chest ----------
 function updatePuzzle(dt, list) {
   const p = player.position;
@@ -1531,7 +1710,7 @@ function updatePuzzle(dt, list) {
     if (!on) all = false;
   });
   if (all && !chest.open && game.state === 'play') {
-    chest.open = true; sfx('open'); burst(CHEST.x, 1.6, CHEST.z, 0xffd43b, 30, 6);
+    chest.open = true; sfx('open'); unlock('chest'); burst(CHEST.x, 1.6, CHEST.z, 0xffd43b, 30, 6);
     toast('🧰 보물상자가 열렸어요! 안에 열쇠 조각이 있어요', 3000);
   }
   chest.lid.rotation.x = lerp(chest.lid.rotation.x, chest.open ? -1.9 : 0, damp(0.01, dt));
@@ -1546,7 +1725,7 @@ function frame() {
 }
 function step(now) {
   const dt = clamp((now - last) / 1000, 0, 0.05); last = now;
-  updatePlats();
+  updatePlats(); updateEvents(dt);
 
   if (game.state === 'countdown') {
     const left = (game.cdEnd - now) / 1000, n = Math.ceil(left);   // real time, so everyone in the room starts together
@@ -1598,7 +1777,7 @@ requestAnimationFrame(frame);
 
 // test hook for local development only
 if (location.hostname === 'localhost' || location.hostname === '127.0.0.1') {
-  window.__gke = { battle, player, me, vel, stars, steps, marbles, sweepers, itemBoxes, pads, plats, pieces, plates, chest, boxes, traps, ISLAND, CHEST, useItem, dash, setItem, flags, keyPos, EXIT, hs, game, cam, opt, spec, remotes, get records() { return records; }, get myId() { return myId; }, get netOk() { return netOk; }, beginRun, groupStart, state: () => ({ vy, grounded, airT }),
+  window.__gke = { ev, ach, unlock, forceEvent(id, ms) { ev.force = { e: EVENTS.find((x) => x.id === id), until: Date.now() + (ms || 15000) }; }, battle, player, me, vel, stars, steps, marbles, sweepers, itemBoxes, pads, plats, pieces, plates, chest, boxes, traps, ISLAND, CHEST, useItem, dash, setItem, flags, keyPos, EXIT, hs, game, cam, opt, spec, remotes, get records() { return records; }, get myId() { return myId; }, get netOk() { return netOk; }, beginRun, groupStart, state: () => ({ vy, grounded, airT }),
     tick(n, dt) { for (let i = 0; i < n; i++) { clockOff += (dt || 1 / 60) * 1000; step(clock()); } } };
 }
 })();

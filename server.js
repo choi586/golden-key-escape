@@ -121,7 +121,7 @@ wss.on('connection', (ws, req) => {
   if (!room) { room = { players: new Map(), lastStart: 0, traps: new Map(), mode: 'race', b: newBattle() }; rooms.set(code, room); }
   if (room.players.size >= MAX_PER_ROOM) { ws.close(1013, 'room full'); return; }
   const id = 'p' + (nextId++);
-  const entry = { ws, state: null, alive: true, msgs: 0, lastItem: 0 };
+  const entry = { ws, state: null, alive: true, msgs: 0, lastItem: 0, lastBump: 0 };
   room.players.set(id, entry);
   sendTo(entry, { hello: id, rec: recordList(code), mode: room.mode, b: battleView(room), traps: [...room.traps.values()].map((t) => ({ id: t.id, by: t.by, p: t.p })) });
 
@@ -178,6 +178,14 @@ wss.on('connection', (ws, req) => {
       const t = { id: 't' + (nextId++), by: id, p, at: now };
       room.traps.set(t.id, t);
       broadcast(room, { ev: 'trap', t: { id: t.id, by: id, p } });
+    } else if (m.cmd === 'bump') {                 // dash into someone to shove them
+      const now = Date.now(), target = typeof m.to === 'string' && m.to !== id ? room.players.get(m.to) : null;
+      if (!target || !target.state || !entry.state || now - entry.lastBump < 1200) return;
+      if (!Array.isArray(m.d) || m.d.length < 2 || !m.d.slice(0, 2).every(num)) return;
+      const a = entry.state.p, v = target.state.p;
+      if (Math.hypot(a[0] - v[0], a[1] - v[1], a[2] - v[2]) > 3.5) return;
+      entry.lastBump = now;
+      sendTo(target, { ev: 'bump', by: id, n: entry.state.n || '친구', d: [clampN(m.d[0], -1, 1), clampN(m.d[1], -1, 1)] });
     } else if (m.cmd === 'trapHit') {
       if (typeof m.id === 'string' && room.traps.delete(m.id)) broadcast(room, { ev: 'trapGone', id: m.id });
     } else if (m.cmd === 'finish') {

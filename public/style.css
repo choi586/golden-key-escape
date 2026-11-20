@@ -158,3 +158,18 @@ body.touch #itemBtn { right:calc(118px + env(safe-area-inset-right,0px)); bottom
 
 .guideLink { display:inline-block; margin-top:10px; font-weight:800; font-size:14px; color:var(--ink); background:#ffe066; border:2px solid var(--ink); border-radius:10px; padding:6px 14px; text-decoration:none; box-shadow:0 3px 0 var(--ink); }
 .guideLink:active { transform:translateY(2px); box-shadow:0 1px 0 var(--ink); }
+
+/* ---------- events, achievements ---------- */
+#evBanner { position:fixed; top:calc(62px + var(--sat)); left:50%; transform:translateX(-50%); background:#2b2140; color:#fff; font-weight:800; font-size:15px; padding:6px 16px; border-radius:999px; border:2px solid #fff; box-shadow:0 3px 0 rgba(43,33,64,.5); white-space:nowrap; pointer-events:none; animation:evIn .3s ease-out; }
+#evBanner.warn { background:#ffe066; color:var(--ink); border-color:var(--ink); }
+@keyframes evIn { from { transform:translateX(-50%) scale(.6); opacity:0; } }
+#achPop { position:fixed; left:50%; bottom:calc(120px + var(--sab)); transform:translateX(-50%) translateY(20px); background:#ffe066; color:var(--ink); border:2px solid var(--ink); border-radius:14px; box-shadow:0 4px 0 var(--ink); padding:9px 18px; font-weight:900; font-size:16px; opacity:0; pointer-events:none; transition:opacity .3s, transform .3s; white-space:nowrap; z-index:30; }
+#achPop.on { opacity:1; transform:translateX(-50%); }
+#achList { list-style:none; margin:0; padding:0; text-align:left; max-height:52vh; overflow:auto; }
+#achList li { display:flex; gap:10px; align-items:flex-start; padding:7px 4px; border-bottom:1px dashed rgba(43,33,64,.25); font-size:14px; opacity:.55; }
+#achList li.got { opacity:1; }
+#achList .ic { flex:none; font-size:18px; }
+.linkrow { display:flex; gap:8px; justify-content:center; flex-wrap:wrap; }
+button.guideLink { font:inherit; font-weight:800; font-size:14px; cursor:pointer; }
+@media (max-width:760px) { #evBanner { top:calc(156px + var(--sat)); font-size:13px; } }
+@media (max-height:480px) { #evBanner { top:calc(58px + var(--sat)); } }
