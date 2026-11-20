@@ -868,7 +868,8 @@ function updatePlayer(dt) {
   // checkpoint flags
   if (grounded) for (let i = 0; i < flags.length; i++) {
     const fl = flags[i], st = steps[fl.idx];
-    if (fl.idx > me.cp && Math.abs(p.y - st.topY) < 0.2 && Math.hypot(p.x - st.cx, p.z - st.cz) < 2.6) {
+    // counts once you stand anywhere at or above the flag's step, so hopping over that step or taking a trampoline can't skip it
+    if (fl.idx > me.cp && p.y >= st.topY - 0.05) {
       me.cp = fl.idx; fl.cloth.material.color.copy(C(0xff4d6d)); sfx('flag');
       toast('🚩 체크포인트! 잡혀도 여기서 다시 시작해요', 2400);
     }
