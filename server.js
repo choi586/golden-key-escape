@@ -13,6 +13,7 @@ const TICK_MS = 66;
 const START_DELAY_MS = 4000;      // countdown everyone sees after "다 같이 출발"
 const START_COOLDOWN_MS = 6000;   // one group start per room every few seconds
 const MAX_RECORDS = 10;
+const MAX_TRAPS_PER_ROOM = 24, MAX_TRAPS_PER_PLAYER = 3, TRAP_TTL_MS = 90000, ITEM_COOLDOWN_MS = 1000;
 
 // ---------- static files (gzipped, cached in memory) ----------
 const fileCache = new Map();   // path -> { mtimeMs, raw, gz }
@@ -71,6 +72,9 @@ function sanitize(m) {
     n: cleanName(m.n),
     c: num(m.c) ? clampN(Math.floor(m.c), 0, 7) : 0,
     k: m.k === true,
+    kp: num(m.kp) ? clampN(Math.floor(m.kp), 0, 3) : 0,
+    h: num(m.h) ? clampN(Math.floor(m.h), 0, 5) : 0,
+    fz: m.fz === true,
     sh: m.sh === true,
     e: num(m.e) && m.e >= 1 && m.e <= 4 ? Math.floor(m.e) : 0,
     s: num(m.s) ? clampN(Math.floor(m.s), 0, 99) : 0,
@@ -102,12 +106,12 @@ const wss = new WebSocketServer({ server, path: '/ws', maxPayload: 1024 });
 wss.on('connection', (ws, req) => {
   const code = (new URL(req.url, 'http://x').searchParams.get('room') || 'lobby').toLowerCase().replace(/[^a-z0-9_-]/g, '').slice(0, 24) || 'lobby';
   let room = rooms.get(code);
-  if (!room) { room = { players: new Map(), lastStart: 0 }; rooms.set(code, room); }
+  if (!room) { room = { players: new Map(), lastStart: 0, traps: new Map() }; rooms.set(code, room); }
   if (room.players.size >= MAX_PER_ROOM) { ws.close(1013, 'room full'); return; }
   const id = 'p' + (nextId++);
-  const entry = { ws, state: null, alive: true, msgs: 0 };
+  const entry = { ws, state: null, alive: true, msgs: 0, lastItem: 0 };
   room.players.set(id, entry);
-  sendTo(entry, { hello: id, rec: recordList(code) });
+  sendTo(entry, { hello: id, rec: recordList(code), traps: [...room.traps.values()].map((t) => ({ id: t.id, by: t.by, p: t.p })) });
 
   ws.on('message', (raw) => {
     if (++entry.msgs > 60) return;                 // per-second flood guard (reset below)
@@ -118,7 +122,22 @@ wss.on('connection', (ws, req) => {
       const now = Date.now();
       if (now - room.lastStart < START_COOLDOWN_MS) return;
       room.lastStart = now;
+      room.traps.clear();
       broadcast(room, { ev: 'start', in: START_DELAY_MS, by: (entry.state && entry.state.n) || cleanName(m.n) || '친구' });
+    } else if (m.cmd === 'trap' || m.cmd === 'freeze') {   // items that affect other players
+      const now = Date.now();
+      if (now - entry.lastItem < ITEM_COOLDOWN_MS) return;
+      if (!Array.isArray(m.p) || m.p.length < 3 || !m.p.slice(0, 3).every(num)) return;
+      const p = [clampN(m.p[0], -18, 18), clampN(m.p[1], 0, 60), clampN(m.p[2], -18, 18)];
+      entry.lastItem = now;
+      if (m.cmd === 'freeze') { broadcast(room, { ev: 'freeze', by: id, n: (entry.state && entry.state.n) || '친구', p }); return; }
+      let mine = 0; for (const t of room.traps.values()) if (t.by === id) mine++;
+      if (mine >= MAX_TRAPS_PER_PLAYER || room.traps.size >= MAX_TRAPS_PER_ROOM) return;
+      const t = { id: 't' + (nextId++), by: id, p, at: now };
+      room.traps.set(t.id, t);
+      broadcast(room, { ev: 'trap', t: { id: t.id, by: id, p } });
+    } else if (m.cmd === 'trapHit') {
+      if (typeof m.id === 'string' && room.traps.delete(m.id)) broadcast(room, { ev: 'trapGone', id: m.id });
     } else if (m.cmd === 'finish') {
       if (!num(m.t) || m.t < 5 || m.t > 99999) return;
       const s = num(m.s) ? clampN(Math.floor(m.s), 0, 99) : 0;
@@ -152,6 +171,9 @@ setInterval(() => {
     e.alive = false; try { e.ws.ping(); } catch (err) { /* ignore */ }
   }
   const now = Date.now();
+  for (const room of rooms.values()) for (const t of room.traps.values()) {
+    if (now - t.at > TRAP_TTL_MS) { room.traps.delete(t.id); broadcast(room, { ev: 'trapGone', id: t.id }); }
+  }
   for (const [code, r] of records) if (!rooms.has(code) && now - r.at > 6 * 3600 * 1000) records.delete(code);
 }, 30000);
 

@@ -19,7 +19,8 @@
 <div id="hud" class="panel hud">
   <div class="hudrow"><span>⏱</span><b id="time">0.0</b></div>
   <div class="hudrow small"><span>⭐ <span id="stars">0</span>/<span id="starMax">0</span></span><span id="shieldIcon" class="hidden">🛡</span></div>
-  <div id="goal">🔑 계단 꼭대기의 열쇠를 찾아요</div>
+  <div class="hudrow small"><span>열쇠 조각</span><span id="pieces"></span></div>
+  <div id="goal">🔑 열쇠 조각 3개를 모아요</div>
 </div>
 
 <div id="progress" class="hud" aria-hidden="true">
@@ -48,6 +49,8 @@
 <div id="toast" class="panel"></div>
 <div id="stick"><i></i></div>
 <button id="jump" type="button">점프</button>
+<button id="dashBtn" type="button" class="hud act" title="대시 (Shift)"><span>💨</span><kbd>Shift</kbd></button>
+<button id="itemBtn" type="button" class="hud act" title="아이템 쓰기 (E)"><span>·</span><kbd>E</kbd></button>
 
 <div id="spectate" class="panel hidden">
   <span id="specName">구경 중</span>
@@ -59,16 +62,19 @@
 <div id="start" class="overlay">
   <div class="card panel">
     <h1>🔑 황금 열쇠 대탈출</h1>
-    <p class="lead">거대한 아이의 놀이방에 갇힌 꼬마 장난감이 되어<br>무지개 계단 꼭대기의 <b>황금 열쇠</b>를 들고 <b>쥐구멍</b>으로 탈출하세요!</p>
+    <p class="lead">거대한 아이의 놀이방에 갇힌 꼬마 장난감이 되어<br>흩어진 <b>황금 열쇠 조각 3개</b>를 모아 <b>쥐구멍</b>으로 탈출하세요!</p>
     <input id="name" maxlength="12" placeholder="닉네임 (최대 12자)" autocomplete="off" enterkeyhint="go">
     <div id="swatches"></div>
+    <div id="hats"></div>
+    <div id="hatInfo" class="hint"></div>
     <button class="go" id="startBtn" type="button">게임 시작</button>
     <div id="roomInfo" class="hint"></div>
     <ul class="tips">
-      <li><b>WASD</b>·방향키 이동, <b>Space</b> 점프, 마우스 드래그로 둘러보기</li>
-      <li>🚩 깃발은 체크포인트, ⭐ 별 모으기, 🛡 방패는 손을 한 번 막아줘요</li>
-      <li>🔴 구슬과 빙글빙글 막대는 점프로! 바닥의 트램펄린은 지름길</li>
-      <li>빨간 원이 보이면 바로 피하세요 ✋</li>
+      <li><b>WASD</b> 이동, <b>Space</b> 점프, <b>Shift</b> 대시, <b>E</b> 아이템, 마우스 드래그로 둘러보기</li>
+      <li>🔑 조각은 세 곳에: ⛰️ 계단 꼭대기, ☁️ 구름섬(계단 중간에서 움직이는 발판), 🧰 보물상자(바닥 버튼 두 개를 블록으로 누르기)</li>
+      <li>❓ 상자에서 아이템이 나와요: 🚀 부스터 🦘 슈퍼 점프 🍌 바나나 ❄️ 얼음 🛡 방패</li>
+      <li>빨간 원이 보이면 바로 피하세요 ✋ 잡히면 조각 하나를 빼앗겨요</li>
+      <li>⭐ 별을 모으면 모자가 열려요</li>
     </ul>
   </div>
 </div>

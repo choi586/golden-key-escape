@@ -119,3 +119,31 @@ body.touch:not(.menu) #jump { display:block; }
   #jump { bottom:calc(20px + var(--sab)); } #emotes { left:38%; }
   #toast { top:14%; font-size:15px; }
 }
+
+/* ---------- key pieces, hats, action buttons ---------- */
+#pieces { display:flex; gap:4px; font-size:16px; }
+#pieces span { filter:grayscale(1); opacity:.35; transition:all .3s; }
+#pieces span.got { filter:none; opacity:1; transform:scale(1.15); }
+#hats { display:flex; justify-content:center; gap:6px; margin:-4px 0 6px; flex-wrap:wrap; }
+#hats button { position:relative; width:42px; height:42px; border-radius:12px; border:2px solid var(--ink); background:#fff; font-size:20px; cursor:pointer; padding:0; }
+#hats button.sel { outline:3px solid var(--ink); outline-offset:2px; background:#ffe066; }
+#hats button.locked { background:#e9ecef; font-size:15px; }
+#hats button small { position:absolute; left:0; right:0; bottom:-2px; font-size:9px; font-weight:800; }
+#hatInfo { margin:0 0 12px !important; }
+.act { position:fixed; bottom:calc(12px + var(--sab)); width:58px; height:58px; border-radius:16px; border:2px solid var(--ink); background:rgba(255,248,238,.93); box-shadow:0 3px 0 var(--ink); cursor:pointer; padding:0; touch-action:none; }
+.act span { font-size:26px; line-height:1; }
+.act kbd { position:absolute; left:50%; transform:translateX(-50%); top:-9px; font:800 10px system-ui; background:var(--ink); color:#fff; border-radius:6px; padding:1px 5px; }
+.act:active { transform:translateY(2px); box-shadow:0 1px 0 var(--ink); }
+#itemBtn { right:12px; } #dashBtn { right:80px; }
+#itemBtn.has { background:#ffe066; animation:itemPulse 1s ease-in-out infinite; }
+#itemBtn:not(.has) span { opacity:.3; }
+#dashBtn.cool { opacity:.4; }
+@keyframes itemPulse { 50% { transform:scale(1.08); } }
+body.touch .act { border-radius:50%; width:62px; height:62px; }
+body.touch .act kbd { display:none; }
+body.touch #dashBtn { right:calc(30px + env(safe-area-inset-right,0px)); bottom:calc(176px + var(--sab)); }
+body.touch #itemBtn { right:calc(118px + env(safe-area-inset-right,0px)); bottom:calc(88px + var(--sab)); }
+@media (max-height:480px) {
+  body.touch #dashBtn { right:calc(120px + env(safe-area-inset-right,0px)); bottom:calc(24px + var(--sab)); }
+  body.touch #itemBtn { right:calc(40px + env(safe-area-inset-right,0px)); bottom:calc(116px + var(--sab)); }
+}

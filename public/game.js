@@ -33,7 +33,11 @@ const EXIT = { x: 0, z: ROOM - 0.8 };
 const N_STEPS = 45, STEP_W = 5.2, STEP_H = 0.35, STEP_D = 3.0;
 const CHECKPOINTS = [15, 30];     // stair indexes with a flag
 const SWEEPERS = [21, 37];        // stair indexes with a spinning bar
-const SHIELDS = [9, 25];          // stair indexes with a shield pickup
+const ITEM_STEPS = [9, 25, 34];   // stair indexes with a mystery item box
+const ITEMS = { boost: '🚀', spring: '🦘', banana: '🍌', freeze: '❄️' };
+const HATS = [['없음', 0, '🚫'], ['고깔', 5, '🎉'], ['야구모자', 15, '🧢'], ['신사모', 30, '🎩'], ['고양이 귀', 50, '🐱'], ['프로펠러', 80, '🚁']];   // name, stars needed, icon
+const DASH_V = 20, DASH_CD = 2.2;
+const CHEST = { x: -14.3, z: -14.3 };
 const EMOTES = ['👋', '😂', '😱', '👍'];
 const MARBLE_R = 0.6, MARBLE_PERIOD = 39000, MARBLE_N = 3;
 const HAND_R = 2.9;
@@ -219,14 +223,42 @@ const TOP_Y = altar.topY;
 
 // ---------- trampolines (shortcuts) ----------
 const pads = [];
-[[0.244, 7.0], [5.376, 6.3]].forEach((d) => {
-  const x = Math.cos(d[0]) * d[1], z = Math.sin(d[0]) * d[1] - 1.0, g = new THREE.Group();
+function addPad(x, y, z, v) {
+  const g = new THREE.Group();
   const rim = mesh(new THREE.CylinderGeometry(1.45, 1.55, 0.28, 28), std(0xff6b6b, 0.5), true); rim.position.y = 0.14; g.add(rim);
   const skin = mesh(new THREE.CylinderGeometry(1.2, 1.2, 0.06, 28), std(0x364fc7, 0.4)); skin.position.y = 0.29; g.add(skin);
   const arrow = mesh(new THREE.CircleGeometry(0.55, 3), basic(0xffffff)); arrow.rotation.x = -Math.PI / 2; arrow.position.y = 0.33; g.add(arrow);
-  g.position.set(x, 0, z); scene.add(g);
-  pads.push({ x, z, r: 1.4, top: 0.3, g, skin, bounce: 0 });
-});
+  g.position.set(x, y, z); scene.add(g);
+  pads.push({ x, z, r: 1.4, top: y + 0.3, v: v || PAD_V, g, skin, bounce: 0 });
+}
+[[0.244, 7.0], [5.376, 6.3]].forEach((d) => addPad(Math.cos(d[0]) * d[1], 0, Math.sin(d[0]) * d[1] - 1.0));
+
+// ---------- cloud island in the middle of the room + a shuttle platform from the stairs ----------
+const ISLAND = { x: 0, z: -1, y: 9.3, r: 3.2 }, DOCK = steps[26];     // the shuttle docks at stair 26
+const plats = [];
+(function buildIsland() {
+  const cloud = std(0xffffff, 0.9), g = new THREE.Group();
+  const top = mesh(new THREE.CylinderGeometry(ISLAND.r, ISLAND.r * 0.8, 0.5, 32), cloud, true); top.position.y = -0.25; g.add(top);
+  for (let i = 0; i < 9; i++) {
+    const a = i / 9 * Math.PI * 2, puff = mesh(new THREE.SphereGeometry(1.0 + (i % 3) * 0.25, 14, 10), cloud);
+    puff.position.set(Math.cos(a) * 2.5, -0.75, Math.sin(a) * 2.5); g.add(puff);
+  }
+  g.position.set(ISLAND.x, ISLAND.y, ISLAND.z); scene.add(g);
+  plats.push({ x: ISLAND.x, z: ISLAND.z, top: ISLAND.y, r: ISLAND.r, dx: 0, dz: 0, g: null });
+  const sg = new THREE.Group();
+  const deck = mesh(new THREE.CylinderGeometry(1.5, 1.3, 0.35, 24), std(0xffc9de, 0.5), true); deck.position.y = -0.175; sg.add(deck);
+  const ring = mesh(new THREE.TorusGeometry(1.5, 0.08, 8, 28), std(0xff8fab, 0.5)); ring.rotation.x = Math.PI / 2; sg.add(ring);
+  scene.add(sg);
+  plats.push({ x: 0, z: 0, top: ISLAND.y, r: 1.5, dx: 0, dz: 0, g: sg });
+})();
+addPad(ISLAND.x - DOCK.rx * 1.3, ISLAND.y, ISLAND.z - DOCK.rz * 1.3, 19.5);   // bounces you up to the golden altar
+function updatePlats() {
+  const sh = plats[1], u = 0.5 - 0.5 * Math.cos(Date.now() / 1000 * Math.PI * 2 / 7), r = lerp(7.3, 3.9, u);
+  const x = ISLAND.x + DOCK.rx * r, z = ISLAND.z + DOCK.rz * r;
+  sh.dx = x - sh.x; sh.dz = z - sh.z; if (Math.abs(sh.dx) + Math.abs(sh.dz) > 1) sh.dx = sh.dz = 0;
+  sh.x = x; sh.z = z; sh.g.position.set(x, sh.top, z);
+}
+updatePlats();
 
 // ---------- checkpoint flags ----------
 const flags = CHECKPOINTS.map((idx) => {
@@ -250,15 +282,39 @@ const stars = [];
   add(-14.5, 1.2, 14.5); add(14.5, 1.2, -14.5); add(0, 1.2, -1);
 })();
 
-// ---------- shield pickups ----------
-const shields = SHIELDS.map((idx) => {
-  const st = steps[idx], g = new THREE.Group();
-  g.add(mesh(new THREE.SphereGeometry(0.5, 20, 14), new THREE.MeshStandardMaterial({ color: C(0x74c0fc), transparent: true, opacity: 0.45, roughness: 0.1 })));
-  const core = mesh(new THREE.IcosahedronGeometry(0.24), std(0xffffff, 0.2)); core.material.emissive = C(0x3b82c4); g.add(core);
-  const x = st.cx - st.rx, z = st.cz - st.rz, y = st.topY + 1.15;
-  g.position.set(x, y, z); scene.add(g);
-  return { g, x, y, z, respawn: 0 };
+// ---------- mystery item boxes ----------
+const itemBoxes = [];
+(function buildItemBoxes() {
+  const tex = canvasTex(128, 128, (c) => {
+    const g = c.createLinearGradient(0, 0, 128, 128); g.addColorStop(0, '#ff8fab'); g.addColorStop(0.5, '#ffd43b'); g.addColorStop(1, '#74c0fc');
+    c.fillStyle = g; c.fillRect(0, 0, 128, 128); c.strokeStyle = '#fff'; c.lineWidth = 10; c.strokeRect(6, 6, 116, 116);
+    c.fillStyle = '#fff'; c.font = '900 92px system-ui,sans-serif'; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText('?', 64, 70);
+  });
+  const geo = new THREE.BoxGeometry(0.75, 0.75, 0.75), mat = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.35 });
+  mat.emissive = C(0x332200);
+  const add = (x, y, z) => { const m = mesh(geo, mat); m.position.set(x, y, z); scene.add(m); itemBoxes.push({ g: m, x, y, z, respawn: 0 }); };
+  ITEM_STEPS.forEach((idx) => { const st = steps[idx]; add(st.cx - st.rx, st.topY + 1.15, st.cz - st.rz); });
+  add(-10, 1.15, -9); add(12, 1.15, 1); add(-11, 1.15, 12);
+  add(ISLAND.x - DOCK.rz * 2.2, ISLAND.y + 1.15, ISLAND.z + DOCK.rx * 2.2);
+})();
+
+// ---------- treasure chest + two floor buttons (push a block on each, or stand on them with a friend) ----------
+const chest = { open: false, lid: null, warned: false };
+const plates = [[-6, 5], [2.5, 7.5]].map((d) => {
+  const base = mesh(new THREE.CylinderGeometry(1.25, 1.35, 0.1, 28), std(0x868e96, 0.6)); base.position.set(d[0], 0.05, d[1]); base.receiveShadow = true; scene.add(base);
+  const cap = mesh(new THREE.CylinderGeometry(1.0, 1.0, 0.12, 28), std(0xff6b6b, 0.4)); cap.position.set(d[0], 0.14, d[1]); scene.add(cap);
+  return { x: d[0], z: d[1], cap, pressed: false };
 });
+(function buildChest() {
+  const wood = std(0x9c6644, 0.7), gold = std(0xffc800, 0.3, 0.3), g = new THREE.Group();
+  const box = mesh(new THREE.BoxGeometry(2.4, 1.2, 1.6), wood, true); box.position.y = 0.6; g.add(box);
+  [-0.8, 0.8].forEach((x) => { const band = mesh(new THREE.BoxGeometry(0.2, 1.24, 1.64), gold); band.position.set(x, 0.6, 0); g.add(band); });
+  const lid = new THREE.Group(); lid.position.set(0, 1.2, -0.8);
+  const lidM = mesh(new THREE.CylinderGeometry(0.8, 0.8, 2.4, 16, 1, false, 0, Math.PI), wood, true); lidM.rotation.z = Math.PI / 2; lidM.rotation.y = Math.PI / 2; lidM.position.set(0, 0, 0.8); lid.add(lidM);
+  const lock = mesh(new THREE.BoxGeometry(0.4, 0.45, 0.12), gold); lock.position.set(0, 0, 1.64); lid.add(lock);
+  g.add(lid); chest.lid = lid;
+  g.position.set(CHEST.x, 0, CHEST.z); g.rotation.y = Math.PI / 4; scene.add(g);
+})();
 
 // ---------- rolling marbles (same timing for everyone in the room) ----------
 const marbles = [];
@@ -368,6 +424,8 @@ function sfx(name) {
   else if (name === 'go') { tone(990, 0.4, 'square', 0.08); tone(1320, 0.4, 'triangle', 0.08, 0, 0.02); }
   else if (name === 'win') [523, 659, 784, 659, 784, 1047].forEach((f, i) => tone(f, 0.25, 'triangle', 0.12, 0, i * 0.12));
   else if (name === 'emote') tone(700, 0.09, 'sine', 0.06, 900);
+  else if (name === 'dash') tone(900, 0.16, 'sawtooth', 0.035, 250);
+  else if (name === 'open') [392, 523, 659, 784].forEach((f, i) => tone(f, 0.3, 'triangle', 0.1, 0, i * 0.1));
   else if (name === 'join') { tone(587, 0.1, 'sine', 0.05); tone(784, 0.14, 'sine', 0.05, 0, 0.09); }
 }
 // background music: a gentle music-box loop that speeds up once you hold the key
@@ -401,10 +459,31 @@ function makeKey(scale) {
   g.scale.setScalar(scale || 1);
   return g;
 }
-const worldKey = makeKey(1.5); worldKey.position.copy(keyPos); scene.add(worldKey);
+// the key is broken into three pieces hidden around the room
+const pieces = [
+  { name: '꼭대기', icon: '⛰️', pos: keyPos.clone() },
+  { name: '구름섬', icon: '☁️', pos: new THREE.Vector3(ISLAND.x + DOCK.rx * 1.4, ISLAND.y + 1.3, ISLAND.z + DOCK.rz * 1.4) },
+  { name: '보물상자', icon: '🧰', pos: new THREE.Vector3(CHEST.x, 2.3, CHEST.z) },
+];
+pieces.forEach((pc) => {
+  pc.got = false;
+  pc.mesh = makeKey(1.25); pc.mesh.position.copy(pc.pos); scene.add(pc.mesh);
+  pc.beam = mesh(new THREE.CylinderGeometry(0.4, 0.9, 12, 20, 1, true), basic(0xffe066, { transparent: true, opacity: 0.16, side: THREE.DoubleSide, depthWrite: false }));
+  pc.beam.position.set(pc.pos.x, pc.pos.y + 5.5, pc.pos.z); scene.add(pc.beam);
+});
+const pieceAvailable = (i) => i !== 2 || chest.open;
 const keyLight = new THREE.PointLight(C(0xffd45e), 1.4, 16); keyLight.position.copy(keyPos); scene.add(keyLight);
-const keyBeam = mesh(new THREE.CylinderGeometry(0.5, 1.1, 14, 20, 1, true), basic(0xffe066, { transparent: true, opacity: 0.16, side: THREE.DoubleSide, depthWrite: false }));
-keyBeam.position.set(keyPos.x, keyPos.y + 6.5, keyPos.z); scene.add(keyBeam);
+
+// ---------- banana traps (shared with the room) ----------
+const traps = new Map();   // id -> { mesh, by, x, y, z }
+function addTrap(id, by, p) {
+  if (traps.has(id) || traps.size > 40) return;
+  const m = mesh(new THREE.TorusGeometry(0.32, 0.12, 8, 14, Math.PI * 1.1), std(0xffe066, 0.4)); m.castShadow = true;
+  m.rotation.x = Math.PI / 2; m.position.set(p[0], p[1] + 0.14, p[2]); scene.add(m);
+  traps.set(id, { mesh: m, by, x: p[0], y: p[1], z: p[2] });
+}
+function removeTrap(id) { const t = traps.get(id); if (t) { scene.remove(t.mesh); traps.delete(id); } }
+function clearTraps() { [...traps.keys()].forEach(removeTrap); }
 
 // ---------- avatars ----------
 const emoteTex = {};
@@ -426,8 +505,10 @@ function makeAvatar(colorIdx) {
     const ch = mesh(new THREE.CircleGeometry(0.07, 12), basic(0xff9eb5, { transparent: true, opacity: 0.75 })); ch.position.set(ex * 1.85, 1.32, 0.3); ch.lookAt(ex * 4, 1.3, 2); rig.add(ch);
   });
   const smile = mesh(new THREE.TorusGeometry(0.09, 0.02, 6, 12, Math.PI), eyeM); smile.position.set(0, 1.33, 0.365); smile.rotation.z = Math.PI; rig.add(smile);
-  const ant = mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.3, 6), bodyMat); ant.position.y = 1.9; rig.add(ant);
-  const bulb = mesh(new THREE.SphereGeometry(0.09, 10, 8), bodyMat); bulb.position.y = 2.08; rig.add(bulb);
+  const antenna = new THREE.Group(); rig.add(antenna);
+  const ant = mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.3, 6), bodyMat); ant.position.y = 1.9; antenna.add(ant);
+  const bulb = mesh(new THREE.SphereGeometry(0.09, 10, 8), bodyMat); bulb.position.y = 2.08; antenna.add(bulb);
+  const hatHolder = new THREE.Group(); hatHolder.position.y = 1.4; rig.add(hatHolder);
   const arms = [-1, 1].map((s) => {
     const piv = new THREE.Group(); piv.position.set(s * 0.5, 1.0, 0);
     const a = mesh(new THREE.BoxGeometry(0.15, 0.46, 0.17), bodyMat); a.position.y = -0.2; a.castShadow = true; piv.add(a);
@@ -442,8 +523,32 @@ function makeAvatar(colorIdx) {
   shield.position.y = 1.0; shield.visible = false; g.add(shield);
   const em = new THREE.Sprite(new THREE.SpriteMaterial({ depthTest: false, transparent: true }));
   em.scale.set(1.3, 1.3, 1); em.position.y = 3.6; em.renderOrder = 11; em.visible = false; g.add(em);
-  g.userData = { rig, bodyMat, key, legs, arms, crown, shield, emote: em, emoteIdx: 0, colorIdx, ph: 0, air: 0 };
+  const ice = mesh(new THREE.BoxGeometry(1.5, 2.3, 1.5), new THREE.MeshStandardMaterial({ color: C(0xa5d8ff), transparent: true, opacity: 0.45, roughness: 0.05, depthWrite: false }));
+  ice.position.y = 1.1; ice.visible = false; g.add(ice);
+  g.userData = { rig, bodyMat, key, legs, arms, crown, shield, ice, antenna, hatHolder, hat: 0, prop: null, emote: em, emoteIdx: 0, colorIdx, ph: 0, air: 0 };
   return g;
+}
+function setHat(av, idx) {
+  const ud = av.userData; if (ud.hat === idx) return;
+  ud.hat = idx; ud.prop = null; ud.antenna.visible = idx === 0;
+  const h = ud.hatHolder; while (h.children.length) h.remove(h.children[0]);
+  const add = (geo, mat, x, y, z) => { const m = mesh(geo, mat); m.position.set(x || 0, y || 0, z || 0); m.castShadow = true; h.add(m); return m; };
+  if (idx === 1) {            // party cone
+    add(new THREE.ConeGeometry(0.24, 0.6, 16), std(0xff8fab, 0.5), 0, 0.62); add(new THREE.SphereGeometry(0.08, 8, 8), std(0xffffff, 0.5), 0, 0.94);
+    const band = add(new THREE.TorusGeometry(0.2, 0.035, 6, 16), std(0xffd43b, 0.5), 0, 0.42); band.rotation.x = Math.PI / 2;
+  } else if (idx === 2) {     // baseball cap
+    add(new THREE.SphereGeometry(0.42, 18, 10, 0, Math.PI * 2, 0, Math.PI / 2), std(0x4dabf7, 0.6), 0, 0.06);
+    const brim = add(new THREE.CylinderGeometry(0.3, 0.3, 0.04, 16), std(0x1c7ed6, 0.6), 0, 0.12, 0.42); brim.scale.z = 0.8;
+  } else if (idx === 3) {     // top hat
+    add(new THREE.CylinderGeometry(0.27, 0.27, 0.46, 18), std(0x2b2140, 0.5), 0, 0.58); add(new THREE.CylinderGeometry(0.46, 0.46, 0.04, 20), std(0x2b2140, 0.5), 0, 0.35);
+    add(new THREE.CylinderGeometry(0.275, 0.275, 0.09, 18), std(0xff6b6b, 0.5), 0, 0.42);
+  } else if (idx === 4) {     // cat ears
+    [-0.2, 0.2].forEach((x) => { const e = add(new THREE.ConeGeometry(0.13, 0.26, 4), std(0x495057, 0.6), x, 0.42); e.rotation.y = Math.PI / 4; add(new THREE.ConeGeometry(0.07, 0.15, 4), std(0xffadc6, 0.6), x, 0.4, 0.05).rotation.y = Math.PI / 4; });
+  } else if (idx === 5) {     // propeller beanie
+    add(new THREE.SphereGeometry(0.42, 18, 10, 0, Math.PI * 2, 0, Math.PI / 2.4), std(0x69db7c, 0.6), 0, 0.08);
+    add(new THREE.CylinderGeometry(0.03, 0.03, 0.14, 6), std(0xffd43b, 0.5), 0, 0.55);
+    ud.prop = add(new THREE.BoxGeometry(0.7, 0.03, 0.1), std(0xff6b6b, 0.5), 0, 0.63);
+  }
 }
 function setAvatarColor(av, idx) {
   if (av.userData.colorIdx === idx) return;
@@ -463,6 +568,7 @@ function animateAvatar(av, moving, grounded, dt) {
   ud.arms[0].rotation.x = s * 0.8; ud.arms[1].rotation.x = -s * 0.8;
   ud.arms[0].rotation.z = -ud.air * 2.3; ud.arms[1].rotation.z = ud.air * 2.3;
   if (ud.shield.visible) ud.shield.rotation.y += dt;
+  if (ud.prop) ud.prop.rotation.y += dt * (moving || !grounded ? 22 : 5);
 }
 function makeLabel(text) {
   const cv = document.createElement('canvas'); cv.width = 256; cv.height = 64;
@@ -487,14 +593,17 @@ function setLabel(sp, text) {
 }
 
 // ---------- local player ----------
-const me = { name: '나', colorIdx: Math.floor(Math.random() * COLORS.length), hasKey: false, finished: null, stars: 0, cp: -1, emote: 0, emoteT: 0, shield: false };
+const me = { name: '나', colorIdx: Math.floor(Math.random() * COLORS.length), hasKey: false, order: [], finished: null, stars: 0, cp: -1, emote: 0, emoteT: 0, shield: false,
+  item: null, boostT: 0, frozenT: 0, dashCd: 0, hat: 0 };
+const dashVec = { x: 0, z: 0 };
+let ridePlat = null, totalStars = Math.max(0, Math.floor(+store.get('totalStars', 0)) || 0);
 const player = makeAvatar(me.colorIdx); scene.add(player);
 const vel = { x: 0, z: 0 }, knock = { x: 0, z: 0, cd: 0 }, squash = { s: 1, v: 0 };
 let vy = 0, grounded = true, airT = 0, jumpBuf = 0, bounceT = 0, fallSpeed = 0, stepPh = 0, padTipShown = false;
 function spawn() {
   if (me.cp >= 0) { const st = steps[me.cp]; player.position.set(st.cx, st.topY, st.cz); }   // last checkpoint flag
   else player.position.set(7 + Math.random() * 6, 0, 11 + Math.random() * 3);
-  player.rotation.y = Math.PI; vy = 0; vel.x = vel.z = 0; knock.x = knock.z = 0; grounded = true; airT = 0;
+  player.rotation.y = Math.PI; vy = 0; vel.x = vel.z = 0; knock.x = knock.z = 0; dashVec.x = dashVec.z = 0; grounded = true; airT = 0; ridePlat = null;
 }
 spawn();
 
@@ -569,6 +678,8 @@ window.addEventListener('keydown', (e) => {
   if (e.code === 'Escape') { if (game.state !== 'menu') toggleSettings(); return; }
   if (!e.repeat && e.code === 'Space') jumpBuf = 0.14;
   if (!e.repeat && /^Digit[1-4]$/.test(e.code)) doEmote(+e.code.slice(5));
+  if (!e.repeat && (e.code === 'ShiftLeft' || e.code === 'ShiftRight')) dash();
+  if (!e.repeat && (e.code === 'KeyE' || e.code === 'KeyQ' || e.code === 'KeyF')) useItem();
   keys[e.code] = true;
   if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].indexOf(e.code) >= 0) e.preventDefault();
 });
@@ -628,9 +739,54 @@ function showCount(text) {
 }
 function setGoal() {
   const g = $('goal');
-  g.textContent = me.hasKey ? '🚪 열쇠를 들고 벽의 쥐구멍으로!' : '🔑 계단 꼭대기의 열쇠를 찾아요';
+  g.textContent = me.hasKey ? '🚪 열쇠 완성! 벽의 쥐구멍으로!' : '🔑 열쇠 조각 3개를 모아요';
   g.classList.toggle('key', me.hasKey);
-  $('pointerLabel').textContent = me.hasKey ? '쥐구멍' : '열쇠';
+  const box = $('pieces'); box.textContent = '';
+  pieces.forEach((pc) => { const sp = document.createElement('span'); sp.textContent = pc.icon; sp.title = pc.name; if (pc.got) sp.className = 'got'; box.appendChild(sp); });
+}
+function setItem(kind) {
+  me.item = kind;
+  const b = $('itemBtn'); b.firstElementChild.textContent = kind ? ITEMS[kind] : '·'; b.classList.toggle('has', !!kind);
+}
+// ---------- items ----------
+function rollItem() {
+  const friends = Object.keys(remotes).length > 0;
+  const bag = friends ? ['boost', 'boost', 'spring', 'spring', 'shield', 'banana', 'banana', 'freeze', 'freeze'] : ['boost', 'boost', 'spring', 'spring', 'shield'];
+  const kind = bag[Math.floor(Math.random() * bag.length)];
+  if (kind === 'shield') {
+    if (me.shield) return rollItemNoShield(bag);
+    me.shield = true; sfx('shield'); toast('🛡 방패! 손을 한 번 막아줘요', 2200); return;
+  }
+  setItem(kind); sfx('shield');
+  toast(ITEMS[kind] + ' ' + { boost: '부스터', spring: '슈퍼 점프', banana: '바나나 함정', freeze: '얼음 폭탄' }[kind] + ' 획득! (E 키 / 아이템 버튼)', 2400);
+}
+function rollItemNoShield(bag) { const b = bag.filter((k) => k !== 'shield'); const kind = b[Math.floor(Math.random() * b.length)]; setItem(kind); sfx('shield'); toast(ITEMS[kind] + ' 아이템 획득! (E 키 / 아이템 버튼)', 2200); }
+function useItem() {
+  if (game.state !== 'play' || !me.item || overlayOpen()) return;
+  const kind = me.item, p = player.position; setItem(null);
+  if (kind === 'boost') { me.boostT = 4; sfx('boing'); toast('🚀 부스터!', 1200); }
+  else if (kind === 'spring') { vy = 15.5; grounded = false; airT = 1; bounceT = 1.2; squash.s = 1.35; sfx('boing'); burst(p.x, p.y + 0.2, p.z, 0x69db7c, 12, 3); }
+  else if (kind === 'banana') {
+    const pos = [Math.round(p.x * 100) / 100, Math.round(supportAt(p.x, p.y, p.z) * 100) / 100, Math.round(p.z * 100) / 100];
+    if (netOk) { try { ws.send(JSON.stringify({ cmd: 'trap', p: pos })); } catch (e) { /* offline */ } }
+    sfx('pop'); toast('🍌 바나나를 놓았어요', 1400);
+  } else if (kind === 'freeze') {
+    if (netOk) { try { ws.send(JSON.stringify({ cmd: 'freeze', p: [p.x, p.y, p.z] })); } catch (e) { /* offline */ } }
+    sfx('shield'); burst(p.x, p.y + 1, p.z, 0xa5d8ff, 40, 9); toast('❄️ 얼음 폭탄! 가까운 친구가 느려져요', 1600);
+  }
+}
+function dash() {
+  if (game.state !== 'play' || me.dashCd > 0 || me.frozenT > 0 || overlayOpen()) return;
+  let dx = vel.x, dz = vel.z;
+  if (Math.hypot(dx, dz) < 0.5) { dx = Math.sin(player.rotation.y); dz = Math.cos(player.rotation.y); }
+  const l = Math.hypot(dx, dz) || 1;
+  dashVec.x = dx / l * DASH_V; dashVec.z = dz / l * DASH_V; me.dashCd = DASH_CD;
+  if (!grounded && vy < 2) vy = 2;                    // a little lift, so an air-dash can save a jump
+  squash.s = 0.8; sfx('dash'); burst(player.position.x, player.position.y + 0.6, player.position.z, 0xffffff, 8, 2, 0.2);
+}
+function gotFrozen(byName) {
+  if (me.shield) { me.shield = false; sfx('pop'); toast('🛡 방패가 얼음을 막았어요!', 1800); return; }
+  me.frozenT = 3; sfx('caught'); toast('❄️ ' + byName + ' 님의 얼음 폭탄! 잠깐 느려져요', 2200);
 }
 function doEmote(idx) {
   if (game.state === 'menu') return;
@@ -671,6 +827,26 @@ function toggleSettings(force) {
   $('startBtn').addEventListener('click', startGame);
   $('name').addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.isComposing) startGame(); });
   $('starMax').textContent = stars.length;
+  // hats unlock with the stars you have collected over all your runs
+  me.hat = clamp(Math.floor(+store.get('hat', 0)) || 0, 0, HATS.length - 1);
+  if (totalStars < HATS[me.hat][1]) me.hat = 0;
+  setHat(player, me.hat);
+  const hb = $('hats');
+  HATS.forEach((h, i) => {
+    const b = document.createElement('button'); b.type = 'button'; const locked = totalStars < h[1];
+    b.textContent = locked ? '🔒' : h[2]; b.title = h[0] + (locked ? ' (별 ' + h[1] + '개 필요)' : '');
+    if (locked) { b.classList.add('locked'); const n = document.createElement('small'); n.textContent = '⭐' + h[1]; b.appendChild(n); }
+    if (i === me.hat) b.classList.add('sel');
+    b.addEventListener('click', () => {
+      if (locked) { $('hatInfo').textContent = h[0] + ': 별을 ' + h[1] + '개 모으면 열려요 (지금 ' + totalStars + '개)'; return; }
+      me.hat = i; setHat(player, i); store.set('hat', i);
+      Array.prototype.forEach.call(hb.children, (x) => x.classList.remove('sel')); b.classList.add('sel');
+    });
+    hb.appendChild(b);
+  });
+  $('hatInfo').textContent = '지금까지 모은 별 ⭐ ' + totalStars + '개';
+  $('itemBtn').addEventListener('pointerdown', (e) => { useItem(); e.preventDefault(); });
+  $('dashBtn').addEventListener('pointerdown', (e) => { dash(); e.preventDefault(); });
 
   // settings
   const bind = (id, key, onChange) => {
@@ -714,9 +890,12 @@ function startGame() {
   beginRun(3);
 }
 function beginRun(countdown) {
-  me.hasKey = false; me.finished = null; me.stars = 0; me.cp = -1; me.emote = 0; me.shield = false; knock.cd = 0;
+  me.hasKey = false; me.order = []; me.finished = null; me.stars = 0; me.cp = -1; me.emote = 0; me.shield = false; knock.cd = 0;
+  me.boostT = 0; me.frozenT = 0; me.dashCd = 0; setItem(null);
+  pieces.forEach((pc) => { pc.got = false; });
+  chest.open = false; chest.warned = false; chest.lid.rotation.x = 0;
   stars.forEach((s) => { s.got = false; s.mesh.visible = true; });
-  shields.forEach((s) => { s.respawn = 0; s.g.visible = true; });
+  itemBoxes.forEach((s) => { s.respawn = 0; s.g.visible = true; });
   flags.forEach((fl) => fl.cloth.material.color.copy(C(0xadb5bd)));
   boxes.forEach((b) => b.mesh.position.set(b.home[0], b.top / 2, b.home[1]));
   $('stars').textContent = '0'; $('time').textContent = '0.0';
@@ -744,7 +923,11 @@ function supportAt(x, y, z) {
   }
   for (let i = 0; i < pads.length; i++) {
     const p = pads[i];
-    if (Math.hypot(x - p.x, z - p.z) <= p.r) s = Math.max(s, p.top);
+    if (y + STEP_UP >= p.top && Math.hypot(x - p.x, z - p.z) <= p.r) s = Math.max(s, p.top);
+  }
+  for (let i = 0; i < plats.length; i++) {
+    const p = plats[i];
+    if (y + STEP_UP >= p.top && Math.hypot(x - p.x, z - p.z) <= p.r) s = Math.max(s, p.top);
   }
   for (let i = 0; i < steps.length; i++) {
     const p = steps[i];
@@ -782,7 +965,8 @@ function shove(dx, dz, power, up, msg) {
 function physStep(dt, ix, iz) {
   const p = player.position, hasInput = Math.hypot(ix, iz) > 0.08;
   // horizontal: accelerate toward the wanted velocity (snappy on the ground, floaty in the air)
-  const tx = hasInput ? ix * SPEED : 0, tz = hasInput ? iz * SPEED : 0;
+  const top = SPEED * (me.boostT > 0 ? 1.6 : 1) * (me.frozenT > 0 ? 0.35 : 1);
+  const tx = hasInput ? ix * top : 0, tz = hasInput ? iz * top : 0;
   const acc = (grounded ? (hasInput ? 60 : 75) : (hasInput ? 24 : 5)) * dt;
   const dvx = tx - vel.x, dvz = tz - vel.z, dl = Math.hypot(dvx, dvz);
   if (dl <= acc) { vel.x = tx; vel.z = tz; } else { vel.x += dvx / dl * acc; vel.z += dvz / dl * acc; }
@@ -790,14 +974,18 @@ function physStep(dt, ix, iz) {
     const kd = Math.pow(0.02, dt); knock.x *= kd; knock.z *= kd;
     if (Math.abs(knock.x) + Math.abs(knock.z) < 0.3) knock.x = knock.z = 0;
   }
-  p.x += (vel.x + knock.x) * dt; p.z += (vel.z + knock.z) * dt;
+  if (dashVec.x || dashVec.z) {
+    const dd = Math.pow(0.0008, dt); dashVec.x *= dd; dashVec.z *= dd;
+    if (Math.abs(dashVec.x) + Math.abs(dashVec.z) < 0.4) dashVec.x = dashVec.z = 0;
+  }
+  p.x += (vel.x + knock.x + dashVec.x) * dt; p.z += (vel.z + knock.z + dashVec.z) * dt;
   pushBoxes();
   p.x = clamp(p.x, -ROOM + 0.4, ROOM - 0.4); p.z = clamp(p.z, -ROOM + 0.4, ROOM - 0.4);
 
   // jump: buffered press + a short grace period after walking off an edge
   const held = keys.Space || jumpHeld;
   if ((jumpBuf > 0 || held) && (grounded || airT < 0.1) && vy <= 0.01) {
-    vy = JUMP_V; grounded = false; airT = 1; jumpBuf = 0; squash.s = 1.25; sfx('jump');
+    vy = JUMP_V * (me.frozenT > 0 ? 0.75 : 1); grounded = false; airT = 1; jumpBuf = 0; squash.s = 1.25; sfx('jump');
   }
   // letting go early makes a shorter hop
   const g = GRAVITY * ((vy > 0 && !held && bounceT <= 0) ? 2.3 : 1);
@@ -814,7 +1002,7 @@ function physStep(dt, ix, iz) {
     for (let i = 0; i < pads.length; i++) {
       const pd = pads[i];
       if (Math.abs(sup - pd.top) < 0.01 && Math.hypot(p.x - pd.x, p.z - pd.z) <= pd.r - 0.15) {
-        vy = PAD_V; grounded = false; airT = 1; bounceT = 1.5; pd.bounce = 1; squash.s = 1.35; sfx('boing');
+        vy = pd.v; grounded = false; airT = 1; bounceT = 1.5; pd.bounce = 1; squash.s = 1.35; sfx('boing');
         burst(p.x, pd.top + 0.1, p.z, 0x74c0fc, 10, 3);
         if (!padTipShown) { padTipShown = true; toast('🎪 트램펄린! 공중에서 방향을 잡아 계단에 착지해요', 2800); }
       }
@@ -831,6 +1019,10 @@ function updatePlayer(dt) {
   let ix = -Math.sin(cam.yaw) * f + Math.cos(cam.yaw) * r, iz = -Math.cos(cam.yaw) * f - Math.sin(cam.yaw) * r;
   const il = Math.hypot(ix, iz); if (il > 1) { ix /= il; iz /= il; }
 
+  if (ridePlat) { player.position.x += ridePlat.dx; player.position.z += ridePlat.dz; }   // carried by the shuttle
+  if (me.boostT > 0) { me.boostT -= dt; if (Math.random() < dt * 25) burst(player.position.x, player.position.y + 0.3, player.position.z, 0xffa94d, 2, 1.2, 0.2); }
+  if (me.frozenT > 0) me.frozenT -= dt;
+  if (me.dashCd > 0) me.dashCd -= dt;
   if (knock.cd > 0) knock.cd -= dt;
   if (jumpBuf > 0) jumpBuf -= dt;
   if (bounceT > 0) bounceT -= dt;
@@ -838,6 +1030,8 @@ function updatePlayer(dt) {
   for (let i = 0; i < n; i++) physStep(dt / n, ix, iz);
 
   const p = player.position, sp = Math.hypot(vel.x, vel.z), moving = sp > 0.6;
+  ridePlat = null;
+  if (grounded) for (let i = 0; i < plats.length; i++) { const pl = plats[i]; if (Math.abs(p.y - pl.top) < 0.02 && Math.hypot(p.x - pl.x, p.z - pl.z) <= pl.r) ridePlat = pl; }
   if (moving) player.rotation.y += angDiff(Math.atan2(vel.x, vel.z), player.rotation.y) * Math.min(1, dt * 14);
   animateAvatar(player, moving, grounded, dt);
   // squash & stretch spring, a little forward lean
@@ -852,19 +1046,28 @@ function updatePlayer(dt) {
     const s = stars[i];
     if (!s.got && Math.hypot(p.x - s.x, p.z - s.z) < 1.1 && Math.abs(p.y + 0.9 - s.y) < 1.3) {
       s.got = true; s.mesh.visible = false; me.stars++; $('stars').textContent = me.stars;
+      totalStars++; store.set('totalStars', totalStars);
       sfx('star'); burst(s.x, s.y, s.z, 0xffe066, 14, 4);
       if (me.stars === stars.length) toast('⭐ 별을 전부 모았어요!', 2400);
     }
   }
-  // shield pickups
-  for (let i = 0; i < shields.length; i++) {
-    const s = shields[i];
+  // mystery item boxes
+  for (let i = 0; i < itemBoxes.length; i++) {
+    const s = itemBoxes[i];
     if (s.respawn > 0) { s.respawn -= dt; if (s.respawn <= 0) s.g.visible = true; continue; }
-    if (!me.shield && Math.hypot(p.x - s.x, p.z - s.z) < 1.2 && Math.abs(p.y + 0.9 - s.y) < 1.4) {
-      me.shield = true; s.g.visible = false; s.respawn = 25; sfx('shield'); burst(s.x, s.y, s.z, 0x74c0fc, 16, 4);
-      toast('🛡 방패 획득! 손을 한 번 막아줘요', 2400);
+    if (!me.item && Math.hypot(p.x - s.x, p.z - s.z) < 1.2 && Math.abs(p.y + 0.9 - s.y) < 1.4) {
+      s.g.visible = false; s.respawn = 12; burst(s.x, s.y, s.z, 0xffd43b, 16, 4); rollItem();
     }
   }
+  // banana traps left by friends
+  traps.forEach((t, id) => {
+    if (t.by === myId || knock.cd > 0) return;
+    if (Math.hypot(p.x - t.x, p.z - t.z) < 0.85 && Math.abs(p.y - t.y) < 0.9) {
+      removeTrap(id);
+      if (netOk) { try { ws.send(JSON.stringify({ cmd: 'trapHit', id })); } catch (e) { /* offline */ } }
+      const a = Math.random() * Math.PI * 2; shove(Math.cos(a), Math.sin(a), 9, 6, '🍌 미끄덩! 바나나를 밟았어요');
+    }
+  });
   // checkpoint flags
   if (grounded) for (let i = 0; i < flags.length; i++) {
     const fl = flags[i], st = steps[fl.idx];
@@ -894,16 +1097,26 @@ function updatePlayer(dt) {
       }
     }
   }
-  // key pickup
-  if (!me.hasKey && Math.hypot(p.x - keyPos.x, p.z - keyPos.z) < 1.5 && Math.abs(p.y + 1 - keyPos.y) < 2.2) {
-    me.hasKey = true; setGoal(); toast('🔑 황금 열쇠 획득! 이제 쥐구멍으로 탈출하세요!', 2800);
-    sfx('key'); burst(keyPos.x, keyPos.y, keyPos.z, 0xffd43b, 30, 6);
+  // key pieces
+  for (let i = 0; i < pieces.length; i++) {
+    const pc = pieces[i];
+    if (pc.got || !pieceAvailable(i)) continue;
+    if (Math.hypot(p.x - pc.pos.x, p.z - pc.pos.z) < 1.5 && Math.abs(p.y + 1 - pc.pos.y) < 2.2) {
+      pc.got = true; me.order.push(i); me.hasKey = me.order.length === pieces.length; setGoal();
+      sfx('key'); burst(pc.pos.x, pc.pos.y, pc.pos.z, 0xffd43b, 30, 6);
+      toast(me.hasKey ? '🔑 황금 열쇠 완성! 이제 쥐구멍으로 탈출하세요!' : '🔑 열쇠 조각 ' + me.order.length + '/3! (' + pc.name + ')', 2800);
+    }
+  }
+  // the locked chest: tell the player what to do
+  if (!chest.open && !chest.warned && p.y < 1 && Math.hypot(p.x - CHEST.x, p.z - CHEST.z) < 3.2) {
+    chest.warned = true; toast('🧰 잠긴 보물상자! 바닥의 빨간 버튼 두 개를 블록으로 눌러요 (친구가 밟아도 돼요)', 4200);
+    setTimeout(() => { chest.warned = false; }, 9000);
   }
   // escape
   const nearExit = p.y < 1 && Math.hypot(p.x - EXIT.x, p.z - EXIT.z) < 1.9;
   if (me.hasKey && nearExit) finish();
   else if (nearExit && !updatePlayer.warned) {
-    updatePlayer.warned = true; toast('쥐구멍이 잠겨 있어요. 열쇠가 필요해요 🔒');
+    updatePlayer.warned = true; toast('쥐구멍이 잠겨 있어요. 열쇠 조각 3개가 필요해요 🔒');
     setTimeout(() => { updatePlayer.warned = false; }, 3000);
   }
 }
@@ -928,9 +1141,11 @@ function caught() {
     me.shield = false; sfx('pop'); burst(player.position.x, player.position.y + 1, player.position.z, 0x74c0fc, 26, 6);
     toast('🛡 방패가 막아줬어요!', 2000); cam.shake = 0.4; return;
   }
-  const hadKey = me.hasKey, back = me.cp >= 0 ? '체크포인트로' : '처음으로';
+  const back = me.cp >= 0 ? '체크포인트로' : '처음으로';
+  let lost = null;
+  if (me.order.length) { lost = pieces[me.order.pop()]; lost.got = false; }      // the newest piece goes back where it was
   me.hasKey = false; setGoal(); spawn(); cam.shake = 0.5; sfx('caught');
-  toast(hadKey ? '✋ 잡혔어요! 열쇠를 빼앗기고 ' + back + '…' : '✋ 잡혔어요! ' + back + ' 돌아갑니다', 2600);
+  toast(lost ? '✋ 잡혔어요! ' + lost.name + ' 조각을 빼앗기고 ' + back + '…' : '✋ 잡혔어요! ' + back + ' 돌아갑니다', 2800);
   if (navigator.vibrate) { try { navigator.vibrate([80, 40, 120]); } catch (e) { /* ignore */ } }
 }
 
@@ -967,7 +1182,7 @@ function updateHand(dt, now) {
     if (hs.t <= 0) {
       hs.state = 'hover';
       // the kid gets impatient the higher you climb, and furious once you hold the key
-      const hurry = me.hasKey ? 1 : clamp(p.y / TOP_Y, 0, 1) * 0.6;
+      const hurry = me.hasKey ? 1 : Math.max(clamp(p.y / TOP_Y, 0, 1) * 0.6, me.order.length * 0.25);
       hs.t = (6 - 2.6 * hurry) + Math.random() * (4 - 1.8 * hurry);
     }
   }
@@ -999,6 +1214,9 @@ function readPeer(pr) {
     c: (typeof pr.c === 'number' && isFinite(pr.c)) ? ((Math.floor(pr.c) % COLORS.length) + COLORS.length) % COLORS.length : 0,
     e: (typeof pr.e === 'number' && pr.e >= 1 && pr.e <= EMOTES.length) ? Math.floor(pr.e) : 0,
     s: (typeof pr.s === 'number' && isFinite(pr.s)) ? clamp(Math.floor(pr.s), 0, 99) : 0,
+    kp: (typeof pr.kp === 'number' && isFinite(pr.kp)) ? clamp(Math.floor(pr.kp), 0, 3) : 0,
+    h: (typeof pr.h === 'number' && isFinite(pr.h)) ? clamp(Math.floor(pr.h), 0, HATS.length - 1) : 0,
+    fz: pr.fz === true,
     k: pr.k === true, sh: pr.sh === true, t: (typeof pr.t === 'number' && isFinite(pr.t) && pr.t > 0) ? pr.t : null,
   };
 }
@@ -1015,7 +1233,8 @@ function syncRemotes(dt) {
     }
     const ud = r.av.userData, pos = r.av.position;
     setAvatarColor(r.av, d.c); setLabel(r.label, d.name);
-    ud.key.visible = d.k; ud.shield.visible = d.sh; ud.crown.visible = p.id === champ; r.av.visible = d.t === null; showEmote(r.av, d.e);
+    ud.key.visible = d.kp > 0; ud.key.scale.setScalar(0.35 + 0.14 * d.kp); ud.ice.visible = d.fz; setHat(r.av, d.h);
+    ud.shield.visible = d.sh; ud.crown.visible = p.id === champ; r.av.visible = d.t === null; showEmote(r.av, d.e);
     const k = damp(0.0005, dt), moved = Math.hypot(d.x - pos.x, d.z - pos.z), air = Math.abs(d.y - pos.y) > 0.35;
     if (moved > 12) pos.set(d.x, d.y, d.z);     // respawned: snap instead of sliding across the room
     else { pos.x += (d.x - pos.x) * k; pos.y += (d.y - pos.y) * k; pos.z += (d.z - pos.z) * k; }
@@ -1026,10 +1245,11 @@ function syncRemotes(dt) {
     const prev = prevPeers[p.id];
     if (!prev) { if (peersSeen && game.state !== 'menu') { feed('👋 ' + d.name + ' 입장'); sfx('join'); } }
     else {
-      if (d.k && !prev.k) feed('🔑 ' + d.name + ' 열쇠 획득!');
+      if (d.k && !prev.k) feed('🔑 ' + d.name + ' 열쇠 완성!');
+      else if (d.kp > prev.kp) feed('🔑 ' + d.name + ' 조각 ' + d.kp + '/3');
       if (d.t !== null && prev.t === null) feed('🏁 ' + d.name + ' 탈출! ' + fmt(d.t));
     }
-    prevPeers[p.id] = { k: d.k, t: d.t, name: d.name };
+    prevPeers[p.id] = { k: d.k, kp: d.kp, t: d.t, name: d.name };
   }
   if (netOk && snapshot.received) peersSeen = true;
   for (const id in remotes) if (!seen[id]) {
@@ -1045,7 +1265,7 @@ function sendPresence(now) {
   lastSend = now;
   const p = player.position, r2 = (v) => Math.round(v * 100) / 100;
   try {
-    ws.send(JSON.stringify({ n: me.name, c: me.colorIdx, k: me.hasKey, sh: me.shield, t: me.finished, e: me.emote, s: me.stars,
+    ws.send(JSON.stringify({ n: me.name, c: me.colorIdx, k: me.hasKey, kp: me.order.length, h: me.hat, fz: me.frozenT > 0, sh: me.shield, t: me.finished, e: me.emote, s: me.stars,
       p: [r2(p.x), r2(p.y), r2(p.z), r2(player.rotation.y)] }));
   } catch (e) { /* reconnecting */ }
 }
@@ -1058,11 +1278,21 @@ function connect() {
   ws.onmessage = (ev) => {
     let m; try { m = JSON.parse(ev.data); } catch (e) { return; }
     if (!m || typeof m !== 'object') return;
-    if (typeof m.hello === 'string') myId = m.hello;
+    if (typeof m.hello === 'string') { myId = m.hello; clearTraps(); }
+    const okP = (a) => Array.isArray(a) && a.length >= 3 && a.slice(0, 3).every((v) => typeof v === 'number' && isFinite(v));
+    if (Array.isArray(m.traps)) m.traps.forEach((t) => { if (t && typeof t.id === 'string' && okP(t.p)) addTrap(t.id, t.by, t.p); });
+    if (m.ev === 'trap' && m.t && typeof m.t.id === 'string' && okP(m.t.p)) addTrap(m.t.id, m.t.by, m.t.p);
+    if (m.ev === 'trapGone' && typeof m.id === 'string') removeTrap(m.id);
+    if (m.ev === 'freeze' && okP(m.p) && m.by !== myId && game.state === 'play') {
+      const pp = player.position;
+      burst(m.p[0], m.p[1] + 1, m.p[2], 0xa5d8ff, 40, 9);
+      if (Math.hypot(pp.x - m.p[0], pp.y - m.p[1], pp.z - m.p[2]) < 10) gotFrozen(typeof m.n === 'string' ? m.n.slice(0, 12) : '친구');
+    }
     if (Array.isArray(m.rec)) { records = m.rec.filter((r) => r && typeof r.t === 'number' && isFinite(r.t)).slice(0, 10); renderRank(); }
     if (Array.isArray(m.peers)) { snapshot = m.peers; snapshot.received = true; }
     if (m.ev === 'start' && typeof m.in === 'number') {
       groupStart.sent = 0;
+      clearTraps();
       if (game.state === 'menu') return;
       toggleSettings(false);
       beginRun(clamp(m.in / 1000, 1, 10));
@@ -1070,7 +1300,7 @@ function connect() {
     }
   };
   ws.onclose = (e) => {
-    netOk = false; snapshot = []; myId = null;
+    netOk = false; snapshot = []; myId = null; clearTraps();
     if (e && e.code === 1013) { $('net').textContent = '방이 꽉 찼어요'; setTimeout(connect, 8000); } else setTimeout(connect, 2000);
   };
   ws.onerror = () => { try { ws.close(); } catch (e) { /* ignore */ } };
@@ -1079,12 +1309,12 @@ connect();
 
 // ---------- board / progress / ranking ----------
 function updateBoard(list) {
-  const rows = [{ id: 'me', name: me.name, c: me.colorIdx, y: player.position.y, k: me.hasKey, t: me.finished, s: me.stars, me: true }];
-  list.forEach((d) => rows.push({ id: d.id, name: d.name, c: d.c, y: d.y, k: d.k, t: d.t, s: d.s, me: false }));
+  const rows = [{ id: 'me', name: me.name, c: me.colorIdx, y: player.position.y, k: me.hasKey, kp: me.order.length, t: me.finished, s: me.stars, me: true }];
+  list.forEach((d) => rows.push({ id: d.id, name: d.name, c: d.c, y: d.y, k: d.k, kp: d.kp, t: d.t, s: d.s, me: false }));
   rows.sort((a, b) => {
     if ((a.t !== null) !== (b.t !== null)) return a.t !== null ? -1 : 1;
     if (a.t !== null) return a.t - b.t;
-    if (a.k !== b.k) return a.k ? -1 : 1;
+    if (a.kp !== b.kp) return b.kp - a.kp;
     return b.y - a.y;
   });
   const champ = records.length ? records[0].id : null;
@@ -1095,7 +1325,7 @@ function updateBoard(list) {
     const nm = document.createElement('span'); nm.className = 'nm';
     nm.textContent = ((r.me ? myId === champ && champ !== null : r.id === champ) ? '👑 ' : '') + r.name + (r.me ? ' (나)' : '');
     const st = document.createElement('span'); st.className = 'st';
-    st.textContent = r.t !== null ? '🏁 ' + fmt(r.t) : (r.k ? '🔑 ' : '') + Math.round(r.y) + 'm';
+    st.textContent = r.t !== null ? '🏁 ' + fmt(r.t) : '🔑' + r.kp + '/3';
     li.appendChild(dot); li.appendChild(nm); li.appendChild(st); ol.appendChild(li);
   });
   if (rows.length > 8) { const li = document.createElement('li'); li.textContent = '… 외 ' + (rows.length - 8) + '명'; ol.appendChild(li); }
@@ -1133,7 +1363,15 @@ const tmpV = new THREE.Vector3();
 function updatePointer() {
   const el = $('pointer');
   if (game.state !== 'play') { el.style.display = 'none'; return; }
-  if (me.hasKey) tmpV.set(EXIT.x, 1.2, ROOM - 0.5); else tmpV.copy(keyPos);
+  let label = '쥐구멍';
+  if (me.hasKey) tmpV.set(EXIT.x, 1.2, ROOM - 0.5);
+  else {      // nearest piece you still need
+    let best = null, bd = 1e9;
+    pieces.forEach((pc) => { if (pc.got) return; const d = pc.pos.distanceTo(player.position); if (d < bd) { bd = d; best = pc; } });
+    if (!best) { el.style.display = 'none'; return; }
+    tmpV.copy(best.pos); label = best.name;
+  }
+  if ($('pointerLabel').textContent !== label) $('pointerLabel').textContent = label;
   const dist = tmpV.distanceTo(player.position);
   tmpV.project(camera);
   const behind = tmpV.z > 1;
@@ -1184,6 +1422,25 @@ function updateCamera(dt, now, list) {
   camera.lookAt(tx, ty, tz);
 }
 
+// ---------- floor buttons + chest ----------
+function updatePuzzle(dt, list) {
+  const p = player.position;
+  let all = true;
+  plates.forEach((pl) => {
+    let on = game.state === 'play' && p.y < 0.6 && Math.hypot(p.x - pl.x, p.z - pl.z) < 1.05;
+    for (let i = 0; i < boxes.length && !on; i++) on = Math.hypot(boxes[i].mesh.position.x - pl.x, boxes[i].mesh.position.z - pl.z) < 1.05;
+    for (let i = 0; i < list.length && !on; i++) on = list[i].t === null && list[i].y < 0.6 && Math.hypot(list[i].x - pl.x, list[i].z - pl.z) < 1.05;
+    if (on !== pl.pressed) { pl.pressed = on; pl.cap.material.color.copy(C(on ? 0x51cf66 : 0xff6b6b)); if (on && game.state === 'play') sfx('flag'); }
+    pl.cap.position.y = lerp(pl.cap.position.y, on ? 0.08 : 0.14, damp(0.001, dt));
+    if (!on) all = false;
+  });
+  if (all && !chest.open && game.state === 'play') {
+    chest.open = true; sfx('open'); burst(CHEST.x, 1.6, CHEST.z, 0xffd43b, 30, 6);
+    toast('🧰 보물상자가 열렸어요! 안에 열쇠 조각이 있어요', 3000);
+  }
+  chest.lid.rotation.x = lerp(chest.lid.rotation.x, chest.open ? -1.9 : 0, damp(0.01, dt));
+}
+
 // ---------- main loop ----------
 const fps = { t: 0, n: 0, checked: false };
 let last = clock(), boardT = 0;
@@ -1193,6 +1450,7 @@ function frame() {
 }
 function step(now) {
   const dt = clamp((now - last) / 1000, 0, 0.05); last = now;
+  updatePlats();
 
   if (game.state === 'countdown') {
     const left = (game.cdEnd - now) / 1000, n = Math.ceil(left);   // real time, so everyone in the room starts together
@@ -1209,21 +1467,31 @@ function step(now) {
   if (me.emoteT > 0) { me.emoteT -= dt; if (me.emoteT <= 0) me.emote = 0; }
   showEmote(player, me.emote);
   player.userData.shield.visible = me.shield; if (me.shield) player.userData.shield.rotation.y += dt;
+  player.userData.ice.visible = me.frozenT > 0 && game.state === 'play';
   for (let i = 0; i < stars.length; i++) { const s = stars[i]; s.mesh.rotation.y += dt * 2.4; s.mesh.position.y = s.y + Math.sin(now * 0.004 + i) * 0.12; }
-  shields.forEach((s, i) => { s.g.rotation.y += dt * 1.5; s.g.position.y = s.y + Math.sin(now * 0.003 + i * 2) * 0.12; });
+  itemBoxes.forEach((s, i) => { s.g.rotation.y += dt * 1.5; s.g.rotation.x += dt * 0.7; s.g.position.y = s.y + Math.sin(now * 0.003 + i * 2) * 0.12; });
+  traps.forEach((t) => { t.mesh.rotation.z += dt * 1.2; });
   pads.forEach((pd) => { pd.bounce = Math.max(0, pd.bounce - dt * 3); pd.skin.position.y = 0.29 - Math.sin(pd.bounce * Math.PI) * 0.16; });
   const list = syncRemotes(dt);
   sendPresence(now);
+  updatePuzzle(dt, list);
 
-  worldKey.visible = keyBeam.visible = !me.hasKey && game.state !== 'done';
-  worldKey.rotation.y += dt * 2; worldKey.position.y = keyPos.y + Math.sin(now * 0.003) * 0.2;
-  keyBeam.material.opacity = 0.12 + 0.05 * Math.sin(now * 0.004);
-  player.userData.key.visible = me.hasKey; player.visible = game.state !== 'done';
+  pieces.forEach((pc, i) => {
+    pc.mesh.visible = pc.beam.visible = !pc.got && pieceAvailable(i) && game.state !== 'done';
+    pc.mesh.rotation.y += dt * 2; pc.mesh.position.y = pc.pos.y + Math.sin(now * 0.003 + i) * 0.2;
+    pc.beam.material.opacity = 0.12 + 0.05 * Math.sin(now * 0.004 + i);
+  });
+  keyLight.visible = !pieces[0].got;
+  const pk = player.userData.key; pk.visible = me.order.length > 0; pk.scale.setScalar(0.35 + 0.14 * me.order.length);
+  player.visible = game.state !== 'done';
   exitGlow.material.opacity = me.hasKey ? 0.35 + 0.3 * Math.sin(now * 0.006) : 0;
   exitLock.visible = !me.hasKey; exitLock.position.y = 2.5 + Math.sin(now * 0.003) * 0.1;
 
   boardT -= dt;
-  if (boardT <= 0) { boardT = 0.25; $('shieldIcon').classList.toggle('hidden', !me.shield); updateBoard(list); }
+  if (boardT <= 0) {
+    boardT = 0.25; $('shieldIcon').classList.toggle('hidden', !me.shield); updateBoard(list);
+    const db = $('dashBtn'); db.classList.toggle('cool', me.dashCd > 0);
+  }
   if (game.state === 'play') $('time').textContent = game.elapsed < 60 ? game.elapsed.toFixed(1) : fmt(game.elapsed);
   updateCamera(dt, now, list);
   updatePointer();
@@ -1234,7 +1502,7 @@ requestAnimationFrame(frame);
 
 // test hook for local development only
 if (location.hostname === 'localhost' || location.hostname === '127.0.0.1') {
-  window.__gke = { player, me, vel, stars, steps, marbles, sweepers, shields, pads, flags, keyPos, EXIT, hs, game, cam, opt, spec, remotes, get records() { return records; }, get myId() { return myId; }, get netOk() { return netOk; }, beginRun, groupStart, state: () => ({ vy, grounded, airT }),
+  window.__gke = { player, me, vel, stars, steps, marbles, sweepers, itemBoxes, pads, plats, pieces, plates, chest, boxes, traps, ISLAND, CHEST, useItem, dash, setItem, flags, keyPos, EXIT, hs, game, cam, opt, spec, remotes, get records() { return records; }, get myId() { return myId; }, get netOk() { return netOk; }, beginRun, groupStart, state: () => ({ vy, grounded, airT }),
     tick(n, dt) { for (let i = 0; i < n; i++) { clockOff += (dt || 1 / 60) * 1000; step(clock()); } } };
 }
 })();
