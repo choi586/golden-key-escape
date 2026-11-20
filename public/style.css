@@ -155,3 +155,6 @@ body.touch #itemBtn { right:calc(118px + env(safe-area-inset-right,0px)); bottom
 #bendRank li { display:flex; align-items:center; gap:8px; padding:4px 0; }
 #bendRank .rk { width:24px; text-align:center; flex:none; }
 #bend h1 { font-size:24px; }
+
+.guideLink { display:inline-block; margin-top:10px; font-weight:800; font-size:14px; color:var(--ink); background:#ffe066; border:2px solid var(--ink); border-radius:10px; padding:6px 14px; text-decoration:none; box-shadow:0 3px 0 var(--ink); }
+.guideLink:active { transform:translateY(2px); box-shadow:0 1px 0 var(--ink); }
