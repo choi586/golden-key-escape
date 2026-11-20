@@ -21,6 +21,7 @@
   <div class="hudrow small"><span>⭐ <span id="stars">0</span>/<span id="starMax">0</span></span><span id="shieldIcon" class="hidden">🛡</span></div>
   <div class="hudrow small"><span>열쇠 조각</span><span id="pieces"></span></div>
   <div id="goal">🔑 열쇠 조각 3개를 모아요</div>
+  <div id="modeTag">⏱ 기록 경주</div>
 </div>
 
 <div id="progress" class="hud" aria-hidden="true">
@@ -75,6 +76,7 @@
       <li>❓ 상자에서 아이템이 나와요: 🚀 부스터 🦘 슈퍼 점프 🍌 바나나 ❄️ 얼음 🛡 방패</li>
       <li>빨간 원이 보이면 바로 피하세요 ✋ 잡히면 조각 하나를 빼앗겨요</li>
       <li>⭐ 별을 모으면 모자가 열려요</li>
+      <li>⚔️ <b>열쇠 쟁탈전</b>: 설정(⚙️)에서 바꾸면 조각이 방에 한 세트뿐! 든 친구와 부딪혀 빼앗고, 셋 다 들고 탈출하면 승리</li>
     </ul>
   </div>
 </div>
@@ -83,6 +85,9 @@
 <div id="settings" class="overlay hidden">
   <div class="card panel">
     <h2>⚙️ 설정</h2>
+    <label class="row"><span>🎮 게임 방식 (방 전체)</span>
+      <select id="optMode"><option value="race">⏱ 기록 경주</option><option value="battle">⚔️ 열쇠 쟁탈전</option></select>
+    </label>
     <label class="row"><span>🔊 효과음</span><input type="checkbox" id="optSfx"></label>
     <label class="row"><span>🎵 배경 음악</span><input type="checkbox" id="optMusic"></label>
     <label class="row"><span>🎥 카메라 자동 따라가기</span><input type="checkbox" id="optAuto"></label>
@@ -111,6 +116,17 @@
       <button class="go ghost" id="watchBtn" type="button">친구 구경하기</button>
     </div>
     <button class="link" id="groupAgainBtn" type="button">🏁 방 전체 다 같이 다시 출발</button>
+  </div>
+</div>
+
+<!-- 쟁탈전 round result -->
+<div id="bend" class="overlay hidden">
+  <div class="card panel">
+    <h1 id="bendTitle"></h1>
+    <p id="bendSub"></p>
+    <ol id="bendRank"></ol>
+    <div class="btnrow"><button class="go" id="bendNext" type="button">🏁 다음 판 시작</button></div>
+    <p class="hint">누구든 누르면 방 전체가 함께 다음 판을 시작해요.</p>
   </div>
 </div>
 

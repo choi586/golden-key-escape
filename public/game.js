@@ -472,6 +472,10 @@ pieces.forEach((pc) => {
   pc.beam.position.set(pc.pos.x, pc.pos.y + 5.5, pc.pos.z); scene.add(pc.beam);
 });
 const pieceAvailable = (i) => i !== 2 || chest.open;
+// 열쇠 쟁탈전: one shared set of pieces for the whole room, the server decides who holds what
+const battle = { on: false, pieces: [null, null, null], scores: [], phase: 'play', round: 0, over: false, target: 3 };
+let grabCd = 0, stealCd = 0, escapeCd = 0;
+const pieceAtHome = (i) => (battle.on ? battle.pieces[i] === null : !pieces[i].got);
 const keyLight = new THREE.PointLight(C(0xffd45e), 1.4, 16); keyLight.position.copy(keyPos); scene.add(keyLight);
 
 // ---------- banana traps (shared with the room) ----------
@@ -739,10 +743,17 @@ function showCount(text) {
 }
 function setGoal() {
   const g = $('goal');
-  g.textContent = me.hasKey ? '🚪 열쇠 완성! 벽의 쥐구멍으로!' : '🔑 열쇠 조각 3개를 모아요';
+  if (battle.on) g.textContent = me.hasKey ? '🚪 다 모았어요! 쥐구멍으로 도망쳐요!' : '⚔️ 조각을 줍거나, 든 친구와 부딪혀 빼앗아요';
+  else g.textContent = me.hasKey ? '🚪 열쇠 완성! 벽의 쥐구멍으로!' : '🔑 열쇠 조각 3개를 모아요';
   g.classList.toggle('key', me.hasKey);
   const box = $('pieces'); box.textContent = '';
-  pieces.forEach((pc) => { const sp = document.createElement('span'); sp.textContent = pc.icon; sp.title = pc.name; if (pc.got) sp.className = 'got'; box.appendChild(sp); });
+  pieces.forEach((pc, i) => {
+    const sp = document.createElement('span'); sp.textContent = pc.icon; sp.title = pc.name;
+    const owner = battle.on ? battle.pieces[i] : null;
+    if (battle.on ? owner === myId && myId !== null : pc.got) sp.className = 'got'; else if (owner) sp.className = 'taken';
+    box.appendChild(sp);
+  });
+  $('modeTag').textContent = battle.on ? '⚔️ 쟁탈전 · ' + Math.max(1, battle.round) + '판 (' + battle.target + '승 우승)' : '⏱ 기록 경주';
 }
 function setItem(kind) {
   me.item = kind;
@@ -863,7 +874,15 @@ function toggleSettings(force) {
   $('setBtn').addEventListener('click', (e) => { toggleSettings(); e.currentTarget.blur(); });
   $('closeSet').addEventListener('click', () => toggleSettings(false));
   $('settings').addEventListener('click', (e) => { if (e.target === $('settings')) toggleSettings(false); });
-  $('restartBtn').addEventListener('click', () => { toggleSettings(false); beginRun(3); });
+  $('restartBtn').addEventListener('click', () => { toggleSettings(false); if (battle.on) groupStart(); else beginRun(3); });
+  $('optMode').addEventListener('change', (e) => {
+    const mode = e.target.value === 'battle' ? 'battle' : 'race';
+    e.target.value = battle.on ? 'battle' : 'race';            // the server confirms the switch for everyone
+    if (!netOk) { toast('서버에 연결된 뒤에 바꿀 수 있어요'); return; }
+    try { ws.send(JSON.stringify({ cmd: 'mode', mode, n: me.name })); } catch (err) { /* reconnecting */ }
+    toggleSettings(false);
+  });
+  $('bendNext').addEventListener('click', groupStart);
 
   $('shareBtn').addEventListener('click', (e) => {
     const url = location.href, done = () => toast('🔗 주소를 복사했어요! 친구에게 보내세요');
@@ -899,7 +918,9 @@ function beginRun(countdown) {
   flags.forEach((fl) => fl.cloth.material.color.copy(C(0xadb5bd)));
   boxes.forEach((b) => b.mesh.position.set(b.home[0], b.top / 2, b.home[1]));
   $('stars').textContent = '0'; $('time').textContent = '0.0';
-  $('end').classList.add('hidden'); $('spectate').classList.add('hidden'); spec.on = false;
+  $('end').classList.add('hidden'); $('bend').classList.add('hidden'); $('spectate').classList.add('hidden'); spec.on = false;
+  if (battle.on) { me.order = [0, 1, 2].filter((i) => myId !== null && battle.pieces[i] === myId); me.hasKey = me.order.length === 3; }
+  grabCd = stealCd = escapeCd = 0;
   releaseKeys(); spawn(); player.visible = true;
   cam.yaw = Math.PI * 0.15; cam.pitch = 0.42;
   game.state = 'countdown'; game.cdEnd = clock() + (countdown || 3) * 1000; game.lastCount = null; game.elapsed = 0;
@@ -965,7 +986,7 @@ function shove(dx, dz, power, up, msg) {
 function physStep(dt, ix, iz) {
   const p = player.position, hasInput = Math.hypot(ix, iz) > 0.08;
   // horizontal: accelerate toward the wanted velocity (snappy on the ground, floaty in the air)
-  const top = SPEED * (me.boostT > 0 ? 1.6 : 1) * (me.frozenT > 0 ? 0.35 : 1);
+  const top = SPEED * (me.boostT > 0 ? 1.6 : 1) * (me.frozenT > 0 ? 0.35 : 1) * (battle.on ? 1 - 0.06 * me.order.length : 1);   // carrying pieces in 쟁탈전 slows you a little
   const tx = hasInput ? ix * top : 0, tz = hasInput ? iz * top : 0;
   const acc = (grounded ? (hasInput ? 60 : 75) : (hasInput ? 24 : 5)) * dt;
   const dvx = tx - vel.x, dvz = tz - vel.z, dl = Math.hypot(dvx, dvz);
@@ -1100,11 +1121,27 @@ function updatePlayer(dt) {
   // key pieces
   for (let i = 0; i < pieces.length; i++) {
     const pc = pieces[i];
-    if (pc.got || !pieceAvailable(i)) continue;
+    if (!pieceAtHome(i) || !pieceAvailable(i)) continue;
     if (Math.hypot(p.x - pc.pos.x, p.z - pc.pos.z) < 1.5 && Math.abs(p.y + 1 - pc.pos.y) < 2.2) {
+      if (battle.on) {       // ask the server: only one player can have it
+        if (grabCd <= 0 && netOk) { grabCd = 0.4; try { ws.send(JSON.stringify({ cmd: 'grab', i })); } catch (e) { /* offline */ } }
+        continue;
+      }
       pc.got = true; me.order.push(i); me.hasKey = me.order.length === pieces.length; setGoal();
       sfx('key'); burst(pc.pos.x, pc.pos.y, pc.pos.z, 0xffd43b, 30, 6);
       toast(me.hasKey ? '🔑 황금 열쇠 완성! 이제 쥐구멍으로 탈출하세요!' : '🔑 열쇠 조각 ' + me.order.length + '/3! (' + pc.name + ')', 2800);
+    }
+  }
+  // 쟁탈전: bump into someone who carries a piece to steal it
+  if (grabCd > 0) grabCd -= dt; if (stealCd > 0) stealCd -= dt; if (escapeCd > 0) escapeCd -= dt;
+  if (battle.on && stealCd <= 0 && netOk) {
+    for (const id in remotes) {
+      if (battle.pieces.indexOf(id) < 0) continue;
+      const rp = remotes[id].av.position;
+      if (Math.hypot(p.x - rp.x, p.y - rp.y, p.z - rp.z) < 1.5) {
+        stealCd = 0.6; try { ws.send(JSON.stringify({ cmd: 'steal', from: id })); } catch (e) { /* offline */ }
+        break;
+      }
     }
   }
   // the locked chest: tell the player what to do
@@ -1114,7 +1151,9 @@ function updatePlayer(dt) {
   }
   // escape
   const nearExit = p.y < 1 && Math.hypot(p.x - EXIT.x, p.z - EXIT.z) < 1.9;
-  if (me.hasKey && nearExit) finish();
+  if (me.hasKey && nearExit && battle.on) {
+    if (escapeCd <= 0 && netOk) { escapeCd = 1; try { ws.send(JSON.stringify({ cmd: 'escape' })); } catch (e) { /* offline */ } }
+  } else if (me.hasKey && nearExit) finish();
   else if (nearExit && !updatePlayer.warned) {
     updatePlayer.warned = true; toast('쥐구멍이 잠겨 있어요. 열쇠 조각 3개가 필요해요 🔒');
     setTimeout(() => { updatePlayer.warned = false; }, 3000);
@@ -1143,9 +1182,11 @@ function caught() {
   }
   const back = me.cp >= 0 ? '체크포인트로' : '처음으로';
   let lost = null;
-  if (me.order.length) { lost = pieces[me.order.pop()]; lost.got = false; }      // the newest piece goes back where it was
+  if (battle.on) {
+    if (me.order.length) { lost = { name: '' }; if (netOk) { try { ws.send(JSON.stringify({ cmd: 'drop' })); } catch (e) { /* offline */ } } }
+  } else if (me.order.length) { lost = pieces[me.order.pop()]; lost.got = false; }      // the newest piece goes back where it was
   me.hasKey = false; setGoal(); spawn(); cam.shake = 0.5; sfx('caught');
-  toast(lost ? '✋ 잡혔어요! ' + lost.name + ' 조각을 빼앗기고 ' + back + '…' : '✋ 잡혔어요! ' + back + ' 돌아갑니다', 2800);
+  toast(lost ? '✋ 잡혔어요! ' + (lost.name ? lost.name + ' ' : '') + '조각을 빼앗기고 ' + back + '…' : '✋ 잡혔어요! ' + back + ' 돌아갑니다', 2800);
   if (navigator.vibrate) { try { navigator.vibrate([80, 40, 120]); } catch (e) { /* ignore */ } }
 }
 
@@ -1260,6 +1301,52 @@ function syncRemotes(dt) {
   player.userData.crown.visible = myId !== null && myId === champ;
   return list;
 }
+function nameOf(id) { return id === myId ? me.name : (prevPeers[id] ? prevPeers[id].name : '친구'); }
+function setMode(mode) {
+  battle.on = mode === 'battle';
+  $('optMode').value = battle.on ? 'battle' : 'race';
+  if (!battle.on) { me.order = []; me.hasKey = false; pieces.forEach((pc) => { pc.got = false; }); }
+  setGoal();
+}
+function applyBattle(b) {
+  if (!b || typeof b !== 'object' || !Array.isArray(b.pieces)) return;
+  battle.pieces = [0, 1, 2].map((i) => (typeof b.pieces[i] === 'string' ? b.pieces[i] : null));
+  battle.scores = Array.isArray(b.scores) ? b.scores.filter((x) => x && typeof x.id === 'string').map((x) => ({ id: x.id, w: Math.max(0, x.w | 0) })) : [];
+  battle.phase = b.phase === 'results' ? 'results' : 'play'; battle.round = b.round | 0; battle.over = !!b.over; battle.target = (b.target | 0) || 3;
+  if (!battle.on) return;
+  me.order = [0, 1, 2].filter((i) => myId !== null && battle.pieces[i] === myId);
+  me.hasKey = me.order.length === 3; setGoal();
+  const L = b.last; if (!L || typeof L !== 'object' || game.state === 'menu') return;
+  const pcName = Number.isInteger(L.i) && pieces[L.i] ? pieces[L.i].name + ' ' : '', pp = player.position;
+  if (L.type === 'grab') {
+    if (L.by === myId) { sfx('key'); burst(pp.x, pp.y + 1.5, pp.z, 0xffd43b, 24, 5); toast(me.hasKey ? '🔑 다 모았어요! 쥐구멍으로 도망쳐요!' : '🔑 ' + pcName + '조각 획득! 빼앗기지 않게 조심!', 2400); }
+    else feed('🔑 ' + nameOf(L.by) + ' ' + pcName + '조각');
+  } else if (L.type === 'steal') {
+    if (L.by === myId) { sfx('key'); burst(pp.x, pp.y + 1.5, pp.z, 0xffd43b, 24, 5); toast('😈 ' + nameOf(L.from) + ' 님의 조각을 빼앗았어요!' + (me.hasKey ? ' 쥐구멍으로!' : ''), 2400); }
+    else if (L.from === myId) {
+      const r = remotes[L.by], dx = r ? pp.x - r.av.position.x : 1, dz = r ? pp.z - r.av.position.z : 0;
+      shove(dx, dz, 9, 6, '😱 ' + nameOf(L.by) + ' 님에게 조각을 빼앗겼어요! 쫓아가요!');
+    } else feed('😈 ' + nameOf(L.by) + ' → ' + nameOf(L.from) + ' 조각 빼앗기!');
+  } else if (L.type === 'drop' && L.by !== myId) feed('✋ ' + nameOf(L.by) + ' 조각을 놓쳤어요');
+  else if (L.type === 'win') showBattleEnd(L.by);
+}
+function showBattleEnd(winner) {
+  game.state = 'done'; marker.visible = false; hs.state = 'hover'; hs.t = 9; releaseKeys();
+  const mine = winner === myId;
+  $('bendTitle').textContent = (battle.over ? '🏆 최종 우승: ' : '🎉 이번 판 승리: ') + nameOf(winner) + (mine ? ' (나)' : '');
+  $('bendSub').textContent = battle.over ? battle.target + '판을 먼저 이겼어요! 다음 판부터 점수가 새로 시작돼요.' : battle.round + '번째 판 종료 · ' + battle.target + '판을 먼저 이기면 우승';
+  const ol = $('bendRank'); ol.textContent = '';
+  battle.scores.slice().sort((a, b) => b.w - a.w).slice(0, 8).forEach((r, i) => {
+    const li = document.createElement('li'); if (r.id === myId) li.className = 'me';
+    const rk = document.createElement('span'); rk.className = 'rk'; rk.textContent = ['🥇', '🥈', '🥉'][i] || (i + 1);
+    const nm = document.createElement('span'); nm.className = 'nm'; nm.textContent = nameOf(r.id) + (r.id === myId ? ' (나)' : '');
+    const st = document.createElement('span'); st.className = 'st'; st.textContent = '🏆 ' + r.w + '승';
+    li.appendChild(rk); li.appendChild(nm); li.appendChild(st); ol.appendChild(li);
+  });
+  sfx(mine ? 'win' : 'flag');
+  if (mine) [0xff6b6b, 0xffd43b, 0x4dabf7, 0x69db7c].forEach((c) => burst(player.position.x, player.position.y + 1.5, player.position.z - 1.5, c, 24, 8));
+  $('bend').classList.remove('hidden');
+}
 function sendPresence(now) {
   if (!ws || ws.readyState !== 1 || now - lastSend < 66 || game.state === 'menu') return;
   lastSend = now;
@@ -1279,6 +1366,8 @@ function connect() {
     let m; try { m = JSON.parse(ev.data); } catch (e) { return; }
     if (!m || typeof m !== 'object') return;
     if (typeof m.hello === 'string') { myId = m.hello; clearTraps(); }
+    if (m.mode === 'race' || m.mode === 'battle') { if ((m.mode === 'battle') !== battle.on) { setMode(m.mode); if (m.ev === 'mode' && game.state !== 'menu') toast(battle.on ? '⚔️ 열쇠 쟁탈전으로 바뀌었어요!' : '⏱ 기록 경주로 바뀌었어요!', 2600); } }
+    if (m.b) { if (m.ev === 'start' && m.b && typeof m.b === 'object') m.b.last = null; applyBattle(m.b); }
     const okP = (a) => Array.isArray(a) && a.length >= 3 && a.slice(0, 3).every((v) => typeof v === 'number' && isFinite(v));
     if (Array.isArray(m.traps)) m.traps.forEach((t) => { if (t && typeof t.id === 'string' && okP(t.p)) addTrap(t.id, t.by, t.p); });
     if (m.ev === 'trap' && m.t && typeof m.t.id === 'string' && okP(m.t.p)) addTrap(m.t.id, m.t.by, m.t.p);
@@ -1296,7 +1385,8 @@ function connect() {
       if (game.state === 'menu') return;
       toggleSettings(false);
       beginRun(clamp(m.in / 1000, 1, 10));
-      toast('🏁 ' + (typeof m.by === 'string' ? m.by.slice(0, 12) : '친구') + ' 님이 다 같이 출발을 눌렀어요!', 3000);
+      if (battle.on) toast('⚔️ 열쇠 쟁탈전 ' + Math.max(1, battle.round) + '판! 조각을 줍고, 든 친구와 부딪혀 빼앗아요', 3600);
+      else toast('🏁 ' + (typeof m.by === 'string' ? m.by.slice(0, 12) : '친구') + ' 님이 다 같이 출발을 눌렀어요!', 3000);
     }
   };
   ws.onclose = (e) => {
@@ -1325,7 +1415,8 @@ function updateBoard(list) {
     const nm = document.createElement('span'); nm.className = 'nm';
     nm.textContent = ((r.me ? myId === champ && champ !== null : r.id === champ) ? '👑 ' : '') + r.name + (r.me ? ' (나)' : '');
     const st = document.createElement('span'); st.className = 'st';
-    st.textContent = r.t !== null ? '🏁 ' + fmt(r.t) : '🔑' + r.kp + '/3';
+    const wins = battle.on ? (battle.scores.find((x) => x.id === (r.me ? myId : r.id)) || { w: 0 }).w : 0;
+    st.textContent = battle.on ? '🏆' + wins + ' 🔑' + r.kp : (r.t !== null ? '🏁 ' + fmt(r.t) : '🔑' + r.kp + '/3');
     li.appendChild(dot); li.appendChild(nm); li.appendChild(st); ol.appendChild(li);
   });
   if (rows.length > 8) { const li = document.createElement('li'); li.textContent = '… 외 ' + (rows.length - 8) + '명'; ol.appendChild(li); }
@@ -1367,9 +1458,14 @@ function updatePointer() {
   if (me.hasKey) tmpV.set(EXIT.x, 1.2, ROOM - 0.5);
   else {      // nearest piece you still need
     let best = null, bd = 1e9;
-    pieces.forEach((pc) => { if (pc.got) return; const d = pc.pos.distanceTo(player.position); if (d < bd) { bd = d; best = pc; } });
-    if (!best) { el.style.display = 'none'; return; }
-    tmpV.copy(best.pos); label = best.name;
+    pieces.forEach((pc, i) => { if (!pieceAtHome(i)) return; const d = pc.pos.distanceTo(player.position); if (d < bd) { bd = d; best = pc; } });
+    if (best) { tmpV.copy(best.pos); label = best.name; }
+    else {
+      let who = null;
+      if (battle.on) for (const id in remotes) { if (battle.pieces.indexOf(id) < 0) continue; const d = remotes[id].av.position.distanceTo(player.position); if (d < bd) { bd = d; who = id; } }
+      if (!who) { el.style.display = 'none'; return; }
+      tmpV.copy(remotes[who].av.position); tmpV.y += 1.2; label = nameOf(who);
+    }
   }
   if ($('pointerLabel').textContent !== label) $('pointerLabel').textContent = label;
   const dist = tmpV.distanceTo(player.position);
@@ -1477,11 +1573,11 @@ function step(now) {
   updatePuzzle(dt, list);
 
   pieces.forEach((pc, i) => {
-    pc.mesh.visible = pc.beam.visible = !pc.got && pieceAvailable(i) && game.state !== 'done';
+    pc.mesh.visible = pc.beam.visible = pieceAtHome(i) && pieceAvailable(i) && game.state !== 'done';
     pc.mesh.rotation.y += dt * 2; pc.mesh.position.y = pc.pos.y + Math.sin(now * 0.003 + i) * 0.2;
     pc.beam.material.opacity = 0.12 + 0.05 * Math.sin(now * 0.004 + i);
   });
-  keyLight.visible = !pieces[0].got;
+  keyLight.visible = pieceAtHome(0);
   const pk = player.userData.key; pk.visible = me.order.length > 0; pk.scale.setScalar(0.35 + 0.14 * me.order.length);
   player.visible = game.state !== 'done';
   exitGlow.material.opacity = me.hasKey ? 0.35 + 0.3 * Math.sin(now * 0.006) : 0;
@@ -1502,7 +1598,7 @@ requestAnimationFrame(frame);
 
 // test hook for local development only
 if (location.hostname === 'localhost' || location.hostname === '127.0.0.1') {
-  window.__gke = { player, me, vel, stars, steps, marbles, sweepers, itemBoxes, pads, plats, pieces, plates, chest, boxes, traps, ISLAND, CHEST, useItem, dash, setItem, flags, keyPos, EXIT, hs, game, cam, opt, spec, remotes, get records() { return records; }, get myId() { return myId; }, get netOk() { return netOk; }, beginRun, groupStart, state: () => ({ vy, grounded, airT }),
+  window.__gke = { battle, player, me, vel, stars, steps, marbles, sweepers, itemBoxes, pads, plats, pieces, plates, chest, boxes, traps, ISLAND, CHEST, useItem, dash, setItem, flags, keyPos, EXIT, hs, game, cam, opt, spec, remotes, get records() { return records; }, get myId() { return myId; }, get netOk() { return netOk; }, beginRun, groupStart, state: () => ({ vy, grounded, airT }),
     tick(n, dt) { for (let i = 0; i < n; i++) { clockOff += (dt || 1 / 60) * 1000; step(clock()); } } };
 }
 })();

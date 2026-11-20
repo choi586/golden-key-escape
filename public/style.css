@@ -147,3 +147,11 @@ body.touch #itemBtn { right:calc(118px + env(safe-area-inset-right,0px)); bottom
   body.touch #dashBtn { right:calc(120px + env(safe-area-inset-right,0px)); bottom:calc(24px + var(--sab)); }
   body.touch #itemBtn { right:calc(40px + env(safe-area-inset-right,0px)); bottom:calc(116px + var(--sab)); }
 }
+
+/* ---------- 쟁탈전 ---------- */
+#pieces span.taken { filter:none; opacity:1; background:#ff8787; border-radius:6px; }
+#modeTag { margin-top:3px; font-size:11.5px; font-weight:800; opacity:.7; }
+#bendRank { margin:0; padding:6px 12px; list-style:none; text-align:left; background:rgba(255,255,255,.7); border-radius:10px; font-size:15px; }
+#bendRank li { display:flex; align-items:center; gap:8px; padding:4px 0; }
+#bendRank .rk { width:24px; text-align:center; flex:none; }
+#bend h1 { font-size:24px; }
