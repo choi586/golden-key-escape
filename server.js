@@ -65,6 +65,7 @@ const records = new Map();   // code -> { list: [{ id, n, c, t, s }], at }  (kep
 let nextId = 1;
 const num = (v) => typeof v === 'number' && Number.isFinite(v);
 const clampN = (v, a, b) => Math.max(a, Math.min(b, v));
+const r2 = (v) => Math.round(v * 100) / 100;
 const cleanName = (v) => (typeof v === 'string' ? v.replace(/[\u0000-\u001f<>]/g, '').trim().slice(0, 12) : '');
 
 // Never trust what a client sends: keep only the fields we know, in sane ranges.
@@ -80,8 +81,8 @@ function sanitize(m) {
     sh: m.sh === true,
     e: num(m.e) && m.e >= 1 && m.e <= 4 ? Math.floor(m.e) : 0,
     s: num(m.s) ? clampN(Math.floor(m.s), 0, 99) : 0,
-    t: num(m.t) && m.t > 0 ? clampN(m.t, 0, 99999) : null,
-    p: [clampN(m.p[0], -18, 18), clampN(m.p[1], 0, 60), clampN(m.p[2], -18, 18), clampN(m.p[3], -100, 100)],
+    t: num(m.t) && m.t > 0 ? Math.round(clampN(m.t, 0, 99999) * 10) / 10 : null,
+    p: [r2(clampN(m.p[0], -18, 18)), r2(clampN(m.p[1], 0, 60)), r2(clampN(m.p[2], -18, 18)), r2(clampN(m.p[3], -100, 100))],
   };
 }
 function sendTo(entry, obj) {
@@ -204,6 +205,7 @@ wss.on('connection', (ws, req) => {
     for (let i = 0; i < 3; i++) if (b.pieces[i] === id) { b.pieces[i] = null; held = true; }
     b.wins.delete(id); b.immune.delete(id);
     room.players.delete(id);
+    for (const e of room.players.values()) e.needFull = true; // 나간 사람을 바로 지우도록 전체 목록을 다시 보냄
     if (room.mode === 'battle' && room.players.size) sendBattle(room, held ? { type: 'drop', by: id, i: -1 } : null);
     if (room.players.size === 0 && rooms.get(code) === room) rooms.delete(code);
   };
@@ -222,11 +224,33 @@ function startRound(room, by) {
 }
 
 // Broadcast: each player receives everyone else in the same room.
+// 전송량 줄이기: 평소에는 달라진 칸만(pd) 보내고, FULL_EVERY 번에 한 번과 누가 나갔을 때는 전부(peers) 보냄
+const FULL_EVERY = 30;
 setInterval(() => {
   for (const room of rooms.values()) {
     const all = [];
-    for (const [id, e] of room.players) if (e.state) all.push(Object.assign({ id }, e.state));
-    for (const [id, e] of room.players) sendTo(e, { peers: all.filter((p) => p.id !== id) });
+    for (const [id, e] of room.players) if (e.state) {
+      const f = {}; for (const k in e.state) f[k] = JSON.stringify(e.state[k]);
+      all.push({ id, state: e.state, f });
+    }
+    for (const [id, e] of room.players) {
+      if (!e.sent || e.needFull || ++e.sentN >= FULL_EVERY) {
+        e.needFull = false; e.sentN = 0; e.sent = new Map();
+        const peers = [];
+        for (const a of all) if (a.id !== id) { e.sent.set(a.id, Object.assign({}, a.f)); peers.push(Object.assign({ id: a.id }, a.state)); }
+        sendTo(e, { peers });
+        continue;
+      }
+      const pd = [];
+      for (const a of all) {
+        if (a.id === id) continue;
+        let last = e.sent.get(a.id); if (!last) { last = {}; e.sent.set(a.id, last); }
+        let d = null;
+        for (const k in a.f) if (last[k] !== a.f[k]) { last[k] = a.f[k]; (d || (d = { id: a.id }))[k] = a.state[k]; }
+        if (d) pd.push(d);
+      }
+      if (pd.length) sendTo(e, { pd });
+    }
   }
 }, TICK_MS);
 

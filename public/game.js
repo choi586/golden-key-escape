@@ -1449,6 +1449,11 @@ function connect() {
     }
     if (Array.isArray(m.rec)) { records = m.rec.filter((r) => r && typeof r.t === 'number' && isFinite(r.t)).slice(0, 10); renderRank(); }
     if (Array.isArray(m.peers)) { snapshot = m.peers; snapshot.received = true; }
+    if (Array.isArray(m.pd)) { // 달라진 칸만 온 것 → 마지막 상태에 덮어씀
+      const map = new Map(); for (const q of snapshot) if (q && typeof q.id === 'string') map.set(q.id, q);
+      for (const d of m.pd) if (d && typeof d.id === 'string') map.set(d.id, Object.assign({}, map.get(d.id), d));
+      snapshot = [...map.values()]; snapshot.received = true;
+    }
     if (m.ev === 'start' && typeof m.in === 'number') {
       groupStart.sent = 0;
       clearTraps();
