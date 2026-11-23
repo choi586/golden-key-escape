@@ -114,7 +114,8 @@ function addRecord(code, id, state, t, s) {
   return true;
 }
 
-const wss = new WebSocketServer({ server, path: '/ws', maxPayload: 1024 });
+// 보내는 신호를 압축해 전송량을 줄임 (브라우저가 알아서 풂)
+const wss = new WebSocketServer({ server, path: '/ws', maxPayload: 1024 , perMessageDeflate: { threshold: 64, zlibDeflateOptions: { level: 3, memLevel: 7 }, concurrencyLimit: 8 } });
 wss.on('connection', (ws, req) => {
   const code = (new URL(req.url, 'http://x').searchParams.get('room') || 'lobby').toLowerCase().replace(/[^a-z0-9_-]/g, '').slice(0, 24) || 'lobby';
   let room = rooms.get(code);
